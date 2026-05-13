@@ -24,7 +24,6 @@ export interface OnePagerOpts {
   productSlug: string;
   lockedDate: string; // YYYY-MM-DD or display string
   owner: string;
-  archivePath: string;
   baseImpact: BaseCatalogImpact;
   finImpact: FinishingCatalogImpact;
   nbdLift: NbdLift;
@@ -289,7 +288,7 @@ export async function buildOnePagerDocx(opts: OnePagerOpts): Promise<Blob> {
             children: [new TextRun({ text: "Reference", bold: true, size: 20 })],
           }),
           paragraph(
-            `Full analysis bundle: ${opts.archivePath || "—"}  |  Notion: Pricing Model Comparison + 7 sub-pages  |  Owner: ${opts.owner || "—"}  |  Locked: ${opts.lockedDate}`
+            `Notion: Pricing Model Comparison + 7 sub-pages  |  Owner: ${opts.owner || "—"}  |  Locked: ${opts.lockedDate}`
           ),
         ],
       },

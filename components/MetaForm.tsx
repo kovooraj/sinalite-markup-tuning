@@ -5,7 +5,6 @@ import { InfoIcon } from "./InfoIcon";
 export interface MetaFormValues {
   lockedDate: string;
   owner: string;
-  archivePath: string;
   targetMinPct: number;
   targetMaxPct: number;
 }
@@ -20,8 +19,6 @@ const TIPS = {
     "Goes into the 1-pager subtitle (“Decisions locked YYYY-MM-DD”) and the Reference footer at the bottom of the docx. Defaults to today.",
   owner:
     "Person accountable for the locked decisions. Appears in the Reference footer of the 1-pager — e.g. “Owner: Mike”. Leave blank to show “—”.",
-  archivePath:
-    "Folder or share path where the full analysis bundle lives. Appears in the Reference footer — e.g. “\\Costing\\Postcards_14PT_AQ_Pricing\\”. Optional.",
   targetMin:
     "Lower bound of the acceptable revenue-impact band (per finance — typically −1%). Scenarios with 3-mo %Δ below this are tagged “Outside”. Does not change the numbers in the output files; only drives the recommendation badge in the results panel.",
   targetMax:
@@ -56,19 +53,6 @@ export function MetaForm({ values, onChange }: Props) {
           value={values.owner}
           onChange={(e) => set("owner", e.target.value)}
           placeholder="e.g. Mike"
-          className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-        />
-      </label>
-      <label className="text-sm md:col-span-2">
-        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
-          <span>Archive path (optional)</span>
-          <InfoIcon text={TIPS.archivePath} />
-        </div>
-        <input
-          type="text"
-          value={values.archivePath}
-          onChange={(e) => set("archivePath", e.target.value)}
-          placeholder="\Costing\Postcards_14PT_AQ_Pricing\"
           className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
         />
       </label>

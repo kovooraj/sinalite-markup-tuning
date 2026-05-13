@@ -154,7 +154,6 @@ const docxBlob = await buildOnePagerDocx({
   productSlug: pe.productSlug,
   lockedDate: new Date().toISOString().slice(0, 10),
   owner: "Mike",
-  archivePath: "\\Costing\\Postcards_Pricing\\",
   baseImpact,
   finImpact,
   nbdLift: nbd,

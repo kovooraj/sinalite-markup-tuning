@@ -99,7 +99,6 @@ export default function Home() {
   const [meta, setMeta] = useState<MetaFormValues>({
     lockedDate: todayIsoDate(),
     owner: "",
-    archivePath: "",
     targetMinPct: -0.01,
     targetMaxPct: 0.005,
   });
@@ -188,7 +187,6 @@ export default function Home() {
         productSlug: computed.pe.productSlug,
         lockedDate: meta.lockedDate || todayIsoDate(),
         owner: meta.owner,
-        archivePath: meta.archivePath,
         baseImpact: computed.baseImpact,
         finImpact: computed.finImpact,
         nbdLift: computed.nbdLift,
