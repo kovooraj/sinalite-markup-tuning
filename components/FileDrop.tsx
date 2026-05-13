@@ -2,17 +2,19 @@
 
 import { useCallback } from "react";
 import { useDropzone } from "react-dropzone";
+import { InfoIcon } from "./InfoIcon";
 
 interface Props {
   label: string;
   hint: string;
+  info?: string;
   file: File | null;
   onSelect: (file: File | null) => void;
   preview?: string;
   error?: string;
 }
 
-export function FileDrop({ label, hint, file, onSelect, preview, error }: Props) {
+export function FileDrop({ label, hint, info, file, onSelect, preview, error }: Props) {
   const onDrop = useCallback(
     (accepted: File[]) => {
       if (accepted[0]) onSelect(accepted[0]);
@@ -38,7 +40,10 @@ export function FileDrop({ label, hint, file, onSelect, preview, error }: Props)
       ].join(" ")}
     >
       <input {...getInputProps()} />
-      <div className="text-sm font-semibold text-zinc-800">{label}</div>
+      <div className="flex items-center justify-center text-sm font-semibold text-zinc-800">
+        <span>{label}</span>
+        {info && <InfoIcon text={info} />}
+      </div>
       <div className="mt-1 text-xs text-zinc-500">{hint}</div>
       {file ? (
         <div className="mt-3 w-full">

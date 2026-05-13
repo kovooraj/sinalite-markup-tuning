@@ -1,5 +1,7 @@
 "use client";
 
+import { InfoIcon } from "./InfoIcon";
+
 export interface MetaFormValues {
   lockedDate: string;
   owner: string;
@@ -13,6 +15,19 @@ interface Props {
   onChange: (next: MetaFormValues) => void;
 }
 
+const TIPS = {
+  lockedDate:
+    "Goes into the 1-pager subtitle (“Decisions locked YYYY-MM-DD”) and the Reference footer at the bottom of the docx. Defaults to today.",
+  owner:
+    "Person accountable for the locked decisions. Appears in the Reference footer of the 1-pager — e.g. “Owner: Mike”. Leave blank to show “—”.",
+  archivePath:
+    "Folder or share path where the full analysis bundle lives. Appears in the Reference footer — e.g. “\\Costing\\Postcards_14PT_AQ_Pricing\\”. Optional.",
+  targetMin:
+    "Lower bound of the acceptable revenue-impact band (per finance — typically −1%). Scenarios with 3-mo %Δ below this are tagged “Outside”. Does not change the numbers in the output files; only drives the recommendation badge in the results panel.",
+  targetMax:
+    "Upper bound of the acceptable revenue-impact band (typically +0.5%). Scenarios within [min, max] are tagged “In band”, and the one with the smallest customer-impact drift vs Scenario A gets the “★ Recommended” star. Output files are unchanged.",
+};
+
 export function MetaForm({ values, onChange }: Props) {
   function set<K extends keyof MetaFormValues>(k: K, v: MetaFormValues[K]) {
     onChange({ ...values, [k]: v });
@@ -20,7 +35,10 @@ export function MetaForm({ values, onChange }: Props) {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <label className="text-sm">
-        <div className="mb-1 text-xs font-semibold text-zinc-700">Locked date</div>
+        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
+          <span>Locked date</span>
+          <InfoIcon text={TIPS.lockedDate} />
+        </div>
         <input
           type="date"
           value={values.lockedDate}
@@ -29,7 +47,10 @@ export function MetaForm({ values, onChange }: Props) {
         />
       </label>
       <label className="text-sm">
-        <div className="mb-1 text-xs font-semibold text-zinc-700">Owner</div>
+        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
+          <span>Owner</span>
+          <InfoIcon text={TIPS.owner} />
+        </div>
         <input
           type="text"
           value={values.owner}
@@ -39,8 +60,9 @@ export function MetaForm({ values, onChange }: Props) {
         />
       </label>
       <label className="text-sm md:col-span-2">
-        <div className="mb-1 text-xs font-semibold text-zinc-700">
-          Archive path (optional)
+        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
+          <span>Archive path (optional)</span>
+          <InfoIcon text={TIPS.archivePath} />
         </div>
         <input
           type="text"
@@ -51,8 +73,9 @@ export function MetaForm({ values, onChange }: Props) {
         />
       </label>
       <label className="text-sm">
-        <div className="mb-1 text-xs font-semibold text-zinc-700">
-          Target band — min %
+        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
+          <span>Target band — min %</span>
+          <InfoIcon text={TIPS.targetMin} />
         </div>
         <input
           type="number"
@@ -63,8 +86,9 @@ export function MetaForm({ values, onChange }: Props) {
         />
       </label>
       <label className="text-sm">
-        <div className="mb-1 text-xs font-semibold text-zinc-700">
-          Target band — max %
+        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
+          <span>Target band — max %</span>
+          <InfoIcon text={TIPS.targetMax} />
         </div>
         <input
           type="number"

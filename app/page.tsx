@@ -227,6 +227,7 @@ export default function Home() {
           <FileDrop
             label="Price Engine .xlsx"
             hint="Sample SKU catalog with PE3 cost decomposition"
+            info="The full SKU catalog for one product — every (size × qty × turnaround × bundling × scoring) variant with its current sale price and a per-machine cost breakdown. Drives: cost-per-SKU lookup, base catalog impact stat, finishing-premium impact stat, and the 12-mo NBD lift narrative."
             file={priceFile}
             onSelect={(f) => {
               setPriceFile(f);
@@ -238,6 +239,7 @@ export default function Home() {
           <FileDrop
             label="3-Month Order Replay .xlsx"
             hint={`Must contain "Per-SKU Detail" sheet from the replay script`}
+            info="The output of replay_orders.py — must contain a 'Per-SKU Detail' sheet with the last 3 months of orders aggregated by SKU and quantity. Drives: all 8 scenario revenue deltas, customer-impact distribution, loss-leader verdict table, and the self-check warning if the cost / order data don't line up."
             file={orderFile}
             onSelect={(f) => {
               setOrderFile(f);
