@@ -14,7 +14,7 @@ import {
 } from "../lib/catalogImpact";
 import { computeLossLeaders } from "../lib/lossLeaders";
 import { buildScenariosXlsx } from "../lib/buildScenariosXlsx";
-import { buildOnePagerDocx } from "../lib/buildOnePagerDocx";
+import { buildOnePagerPdf } from "../lib/buildOnePagerPdf";
 import { buildRepricedXlsx } from "../lib/buildRepricedXlsx";
 
 const PRICE_FILE =
@@ -159,7 +159,7 @@ await writeFile(
   Buffer.from(await scXlsx.arrayBuffer())
 );
 
-const docxBlob = await buildOnePagerDocx({
+const pdfBlob = buildOnePagerPdf({
   productName: pe.productName,
   productSlug: pe.productSlug,
   lockedDate: new Date().toISOString().slice(0, 10),
@@ -173,12 +173,12 @@ const docxBlob = await buildOnePagerDocx({
   targetMaxPct,
 });
 await writeFile(
-  `out/${pe.productSlug}_Markup_Reference_OnePager.docx`,
-  Buffer.from(await docxBlob.arrayBuffer())
+  `out/${pe.productSlug}_Markup_Reference_OnePager.pdf`,
+  Buffer.from(await pdfBlob.arrayBuffer())
 );
 
 console.log(`\nWrote out/${pe.productSlug}_Markup_Tuning_Scenarios.xlsx`);
-console.log(`Wrote out/${pe.productSlug}_Markup_Reference_OnePager.docx`);
+console.log(`Wrote out/${pe.productSlug}_Markup_Reference_OnePager.pdf`);
 
 const repBlob = await buildRepricedXlsx({
   pe,

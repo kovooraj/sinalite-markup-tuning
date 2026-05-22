@@ -1,0 +1,313 @@
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import { saveAs } from "file-saver";
+import { BaseCatalogImpact, FinishingCatalogImpact, NbdLift } from "./catalogImpact";
+import { LossLeadersOutput } from "./lossLeaders";
+import { SCENARIO_BY_ID } from "./markupEngine";
+import { Recommendation } from "./recommend";
+
+export interface OnePagerPdfOpts {
+  productName: string;
+  productSlug: string;
+  lockedDate: string;
+  owner: string;
+  baseImpact: BaseCatalogImpact;
+  finImpact: FinishingCatalogImpact;
+  nbdLift: NbdLift;
+  lossLeaders: LossLeadersOutput;
+  recommendation: Recommendation;
+  targetMinPct: number;
+  targetMaxPct: number;
+}
+
+// --- formatters ---------------------------------------------------------
+
+function fmtUsd(v: number, opts: { signed?: boolean } = {}): string {
+  const abs = Math.abs(v);
+  const sign = opts.signed ? (v >= 0 ? "+" : "−") : v < 0 ? "−" : "";
+  return `${sign}$${abs.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+}
+function fmtUsdK(v: number): string {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "−" : "+";
+  return `${sign}$${(abs / 1000).toFixed(0)}K`;
+}
+function fmtPct(v: number): string {
+  const sign = v < 0 ? "−" : "+";
+  return `${sign}${Math.abs(v * 100).toFixed(1)}%`;
+}
+
+// --- layout helpers -----------------------------------------------------
+
+const PAGE_W = 612; // letter, pt
+const MARGIN = 28; // ~0.39"
+const CONTENT_W = PAGE_W - MARGIN * 2;
+
+interface Cursor {
+  y: number;
+}
+
+function ensureSpace(doc: jsPDF, c: Cursor, needed: number) {
+  const pageH = doc.internal.pageSize.getHeight();
+  if (c.y + needed > pageH - MARGIN) {
+    doc.addPage();
+    c.y = MARGIN;
+  }
+}
+
+function heading(doc: jsPDF, c: Cursor, text: string) {
+  ensureSpace(doc, c, 22);
+  c.y += 6;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(20, 20, 20);
+  doc.text(text, MARGIN, c.y);
+  c.y += 14;
+}
+
+function para(
+  doc: jsPDF,
+  c: Cursor,
+  text: string,
+  opts: { bold?: boolean; italic?: boolean; size?: number; color?: [number, number, number] } = {}
+) {
+  const size = opts.size ?? 9;
+  const style = opts.bold ? (opts.italic ? "bolditalic" : "bold") : opts.italic ? "italic" : "normal";
+  doc.setFont("helvetica", style);
+  doc.setFontSize(size);
+  doc.setTextColor(...(opts.color ?? [60, 60, 60]));
+  const lines = doc.splitTextToSize(text, CONTENT_W);
+  ensureSpace(doc, c, lines.length * (size + 2) + 2);
+  doc.text(lines, MARGIN, c.y);
+  c.y += lines.length * (size + 2) + 2;
+}
+
+function markupTable(
+  doc: jsPDF,
+  c: Cursor,
+  head: string[],
+  rows: string[][]
+) {
+  ensureSpace(doc, c, 12 + rows.length * 14);
+  autoTable(doc, {
+    startY: c.y,
+    head: [head],
+    body: rows,
+    margin: { left: MARGIN, right: MARGIN },
+    styles: { font: "helvetica", fontSize: 8.5, cellPadding: 3, lineColor: [180, 180, 180], lineWidth: 0.3 },
+    headStyles: { fillColor: [31, 56, 100], textColor: [255, 255, 255], fontStyle: "bold", halign: "left" },
+    tableWidth: CONTENT_W,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c.y = (doc as any).lastAutoTable.finalY + 4;
+}
+
+// --- main builder -------------------------------------------------------
+
+export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const c: Cursor = { y: MARGIN };
+  const A = SCENARIO_BY_ID["A_Current_Locked"];
+
+  // Title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.setTextColor(20, 20, 20);
+  doc.text(`${opts.productName} — Locked Markup Reference`, MARGIN, c.y + 8);
+  c.y += 22;
+
+  // Subtitle
+  para(
+    doc,
+    c,
+    `Decisions locked ${opts.lockedDate}  |  Cap rule applies to ALL: final price = MIN(model price, current published price)`,
+    { italic: true, size: 8.5 }
+  );
+
+  // Section 1 — BASE
+  heading(doc, c, "1. BASE Product Markup");
+  para(doc, c, "Applied to PE3 base cost. Volume-discount gradient — markup decreases as qty rises.");
+  para(doc, c, "Formula:  Base Price = MIN(PE3 Base Cost × (1 + Markup %), Current Sale Price)", { bold: true });
+  markupTable(doc, c,
+    ["Qty Band", "Markup %", "Multiplier", "Example: $30 cost  →"],
+    [
+      ["100 – 1,000", `${Math.round(A.grad.base[0] * 100)}%`, `${(1 + A.grad.base[0]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[0])).toFixed(2)}`],
+      ["1,001 – 5,000", `${Math.round(A.grad.base[1] * 100)}%`, `${(1 + A.grad.base[1]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[1])).toFixed(2)}`],
+      ["5,001 – 25,000", `${Math.round(A.grad.base[2] * 100)}%`, `${(1 + A.grad.base[2]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[2])).toFixed(2)}`],
+      ["25,001 – 100,000", `${Math.round(A.grad.base[3] * 100)}%`, `${(1 + A.grad.base[3]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[3])).toFixed(2)}`],
+    ]
+  );
+  const concLine = opts.baseImpact.concentrationLabel ? ` ${opts.baseImpact.concentrationLabel}` : "";
+  para(doc, c,
+    `Catalog impact: ${fmtUsd(opts.baseImpact.impactUsd, { signed: true })} (${fmtPct(opts.baseImpact.pct)}) on base SKUs.${concLine} Cap rule means no customer ever sees a price increase.`,
+    { italic: true }
+  );
+
+  // Section 2 — UPCHARGES
+  heading(doc, c, "2. UPCHARGES — Finishing Add-Ons");
+  para(doc, c, "Applies to all 8 bundling types (Single band 100s/50s/25s, Double band 100s/50s/25s, Shrink Wrap 50s/25s) + Score in Half.");
+  para(doc, c, "Formula:  Add-on Price = PE3 Marginal Cost × (1 + Markup %)", { bold: true });
+  markupTable(doc, c,
+    ["Qty Band", "Markup %", "Multiplier", "Example: $10 marginal cost  →"],
+    [
+      ["100 – 1,000", `${Math.round(A.grad.fin[0] * 100)}%`, `${(1 + A.grad.fin[0]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[0])).toFixed(2)} add-on`],
+      ["1,001 – 5,000", `${Math.round(A.grad.fin[1] * 100)}%`, `${(1 + A.grad.fin[1]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[1])).toFixed(2)} add-on`],
+      ["5,001 – 25,000", `${Math.round(A.grad.fin[2] * 100)}%`, `${(1 + A.grad.fin[2]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[2])).toFixed(2)} add-on`],
+      ["25,001 – 100,000", `${Math.round(A.grad.fin[3] * 100)}%`, `${(1 + A.grad.fin[3]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[3])).toFixed(2)} add-on`],
+    ]
+  );
+  para(doc, c,
+    `Catalog impact: ${fmtUsd(opts.finImpact.impactUsd, { signed: true })} (${fmtPct(opts.finImpact.pct)}) vs current implied premiums. ${opts.finImpact.cellsUplifted} cells uplifted, ${opts.finImpact.cellsReduced} reduced.`,
+    { italic: true }
+  );
+
+  // Section 3 — TURNAROUND / NBD
+  heading(doc, c, "3. TURNAROUND — Rush / Next Business Day (NBD)");
+  para(doc, c, "Multiplier applied to TOTAL order subtotal (base + bundling + scoring) when customer selects rush.");
+  para(doc, c, "Formula:  Final Price = (Base + Add-ons) × (1 + NBD Markup),  capped at current published NBD price", { bold: true });
+  markupTable(doc, c,
+    ["Qty Band", "Markup %", "Multiplier", "Example: $50 subtotal  →"],
+    [
+      ["100 – 5,000", `${Math.round(A.grad.nbd[0] * 100)}%`, `${(1 + A.grad.nbd[0]).toFixed(2)}×`, `$${(50 * (1 + A.grad.nbd[0])).toFixed(2)} final`],
+      ["5,001 – 25,000", `${Math.round(A.grad.nbd[1] * 100)}%`, `${(1 + A.grad.nbd[1]).toFixed(2)}×`, `$${(50 * (1 + A.grad.nbd[1])).toFixed(2)} final`],
+      ["25,001 – 100,000", `${Math.round(A.grad.nbd[2] * 100)}%`, `${(1 + A.grad.nbd[2]).toFixed(2)}×`, `$${(50 * (1 + A.grad.nbd[2])).toFixed(2)} final`],
+    ]
+  );
+  para(doc, c,
+    `Estimated 12-mo realized lift: ${fmtUsdK(opts.nbdLift.lowUsd)}–${fmtUsdK(opts.nbdLift.highUsd)} (${opts.nbdLift.orders3mo} NBD orders, $${(opts.nbdLift.baseRevenue3mo / 1000).toFixed(0)}K base revenue, depending on retention).`,
+    { italic: true }
+  );
+
+  // Section 4 — LOSS LEADERS
+  heading(doc, c, "4. LOSS LEADERS — SKUs Sold Below Cost");
+  para(doc, c, "Top SKUs ranked by 90-day base order volume. Verdict reflects net 90-day margin (base + add-on).");
+  const llRows = opts.lossLeaders.rows.map((r) => [
+    r.sizeQty,
+    fmtUsd(r.baseMarginUsd, { signed: true }),
+    fmtUsd(r.addonMarginUsd, { signed: true }),
+    fmtUsd(r.netUsd, { signed: true }),
+    r.verdict,
+    r.action,
+  ]);
+  const llTotalLabel = opts.lossLeaders.totals.netUsd >= 0 ? "Net + but thin" : "Net negative — flag";
+  const totalRow = [
+    `TOTAL (top ${opts.lossLeaders.rows.length})`,
+    fmtUsd(opts.lossLeaders.totals.baseMarginUsd, { signed: true }),
+    fmtUsd(opts.lossLeaders.totals.addonMarginUsd, { signed: true }),
+    fmtUsd(opts.lossLeaders.totals.netUsd, { signed: true }),
+    llTotalLabel,
+    "—",
+  ];
+  ensureSpace(doc, c, 60);
+  autoTable(doc, {
+    startY: c.y,
+    head: [["Size × Qty", "Base $", "Add-on $", "Net 90-day $", "Verdict", "Action"]],
+    body: [...llRows, totalRow],
+    margin: { left: MARGIN, right: MARGIN },
+    styles: { font: "helvetica", fontSize: 8, cellPadding: 2.5, lineColor: [180, 180, 180], lineWidth: 0.3 },
+    headStyles: { fillColor: [31, 56, 100], textColor: [255, 255, 255], fontStyle: "bold" },
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.index === llRows.length) {
+        data.cell.styles.fillColor = [244, 244, 244];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    tableWidth: CONTENT_W,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c.y = (doc as any).lastAutoTable.finalY + 4;
+  if (opts.lossLeaders.callout) {
+    const qtys = opts.lossLeaders.callout.qtys.map((q) => (q >= 1000 ? `${q / 1000}k` : String(q))).join(" / ");
+    para(doc, c,
+      `⚠ The ${opts.lossLeaders.callout.sizeFamily} family at ${qtys} qtys drives ${fmtUsd(opts.lossLeaders.callout.totalLoss, { signed: true })} of the loss alone. Structurally unprofitable even with add-ons. Flagged for Q3 pricing review.`,
+      { italic: true }
+    );
+  }
+
+  // Section 5 — RECOMMENDED SCENARIO
+  heading(doc, c, "5. RECOMMENDED SCENARIO");
+  const rec = opts.recommendation;
+  const recRow = rec.recommended;
+  const targetBandStr = `[${(opts.targetMinPct * 100).toFixed(1)}%, ${(opts.targetMaxPct * 100).toFixed(1)}%]`;
+  para(doc, c, `Target band: ${targetBandStr}. ${rec.inBand.length} of 8 scenarios fall inside this band.`);
+  if (recRow) {
+    para(doc, c,
+      `Recommended: ${recRow.id} — Δ ${fmtUsd(recRow.deltaUsd, { signed: true })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${fmtUsd(recRow.annualizedUsd, { signed: true })}.`,
+      { bold: true, size: 9.5 }
+    );
+  }
+
+  let sopRule: string;
+  const aInBand = rec.inBand.some((s) => s.id === "A_Current_Locked");
+  if (aInBand && recRow?.id === "A_Current_Locked") {
+    sopRule =
+      "SOP Rule 1: When A_Current_Locked is in the target band, ship A. Customer impact distribution is already measured and operationally approved.";
+  } else if (recRow?.id === "F_Aggressive") {
+    sopRule =
+      "SOP Rule 2: A_Current_Locked is outside target. F_Aggressive is the SOP pick when finance wants revenue-positive — base/finishing/NBD all lift +5pt.";
+  } else if (recRow?.id === "E_Combined_Mod") {
+    sopRule =
+      "SOP Rule 3: A_Current_Locked is outside target. E_Combined_Mod is the SOP pick when finance wants revenue-positive with minimal customer-impact shift.";
+  } else if (rec.inBand.length === 0) {
+    sopRule =
+      "No scenario fully within target band. Pick is the closest to the band; consider widening the band or revisiting cost assumptions.";
+  } else {
+    sopRule = `${recRow?.id ?? "—"} is in target band; A is outside and the SOP's revenue-positive picks (F, E) are not available.`;
+  }
+  para(doc, c, sopRule, { italic: true });
+
+  const altScenarios = [...rec.inBand].sort((a, b) => a.pctDelta - b.pctDelta);
+  if (altScenarios.length > 0) {
+    para(doc, c, "In-band alternatives (sorted by % Δ):", { size: 8.5 });
+    const altBody = altScenarios.map((s) => [
+      s.id,
+      s.baseFormatted,
+      s.finFormatted,
+      s.nbdFormatted,
+      fmtUsd(s.deltaUsd, { signed: true }),
+      `${(s.pctDelta * 100).toFixed(2)}%`,
+      s.id === recRow?.id ? "★ Recommended" : "✓ In band",
+    ]);
+    ensureSpace(doc, c, 12 + altBody.length * 11);
+    const recIdx = altScenarios.findIndex((s) => s.id === recRow?.id);
+    autoTable(doc, {
+      startY: c.y,
+      head: [["Scenario", "Base", "Finishing", "NBD", "3-mo Δ", "% Δ", "Status"]],
+      body: altBody,
+      margin: { left: MARGIN, right: MARGIN },
+      styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2, lineColor: [180, 180, 180], lineWidth: 0.3 },
+      headStyles: { fillColor: [31, 56, 100], textColor: [255, 255, 255], fontStyle: "bold" },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.row.index === recIdx) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [255, 242, 204];
+        }
+      },
+      tableWidth: CONTENT_W,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    c.y = (doc as any).lastAutoTable.finalY + 4;
+  }
+
+  // Reference footer
+  c.y += 8;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(20, 20, 20);
+  doc.text("Reference", MARGIN, c.y);
+  c.y += 12;
+  para(doc, c,
+    `Notion: Pricing Model Comparison + 7 sub-pages  |  Owner: ${opts.owner || "—"}  |  Locked: ${opts.lockedDate}`,
+    { size: 8 }
+  );
+
+  return doc.output("blob");
+}
+
+export function downloadOnePagerPdf(opts: OnePagerPdfOpts): void {
+  const blob = buildOnePagerPdf(opts);
+  saveAs(blob, `${opts.productSlug}_Markup_Reference_OnePager.pdf`);
+}

@@ -16,7 +16,7 @@ import {
 } from "@/lib/catalogImpact";
 import { computeLossLeaders } from "@/lib/lossLeaders";
 import { downloadScenariosXlsx } from "@/lib/buildScenariosXlsx";
-import { downloadOnePagerDocx } from "@/lib/buildOnePagerDocx";
+import { downloadOnePagerPdf } from "@/lib/buildOnePagerPdf";
 import { downloadRepricedXlsx } from "@/lib/buildRepricedXlsx";
 
 interface ComputedState {
@@ -204,7 +204,7 @@ export default function Home() {
     if (!computed) return;
     setGenerating(true);
     try {
-      await downloadOnePagerDocx({
+      downloadOnePagerPdf({
         productName: computed.pe.productName,
         productSlug: computed.pe.productSlug,
         lockedDate: meta.lockedDate || todayIsoDate(),

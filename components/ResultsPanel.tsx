@@ -166,7 +166,7 @@ export function ResultsPanel(props: Props) {
           disabled={props.generating}
           className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
         >
-          ⬇ Download 1-Pager (.docx)
+          ⬇ Download 1-Pager (.pdf)
         </button>
         <button
           type="button"
