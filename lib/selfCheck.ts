@@ -1,7 +1,11 @@
 import { computeNewPrice, SCENARIO_BY_ID } from "./markupEngine";
 import { OrderReplayData, orderRowKey } from "./parseOrderReplay";
-import { PriceEngineData, indexPriceEngine } from "./parsePriceEngine";
-import { commonDimensions } from "./computeScenarios";
+import {
+  PriceEngineData,
+  indexPriceEngine,
+  pickByPriceProximity,
+} from "./parsePriceEngine";
+import { commonDimensions, useStockInKey } from "./computeScenarios";
 
 export interface SelfCheckResult {
   scenarioAComputedDelta: number;
@@ -36,7 +40,8 @@ export function runSelfCheck(
   }
   const scenarioA = SCENARIO_BY_ID["A_Current_Locked"];
   const common = commonDimensions(pe, order);
-  const peIndex = indexPriceEngine(pe, common);
+  const useStock = useStockInKey(pe, order);
+  const { buckets } = indexPriceEngine(pe, common, useStock);
 
   let totalDelta = 0;
   let maxRowDiff = 0;
@@ -44,7 +49,10 @@ export function runSelfCheck(
   let rowsMissed = 0;
 
   for (const r of order.rows) {
-    const match = peIndex.get(orderRowKey(r, common));
+    const match = pickByPriceProximity(
+      buckets.get(orderRowKey(r, common, useStock)),
+      r.avgPaid
+    );
     if (!match) {
       rowsMissed += 1;
       continue;

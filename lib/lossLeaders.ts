@@ -1,6 +1,11 @@
 import { OrderReplayData, OrderReplayRow, orderRowKey } from "./parseOrderReplay";
-import { PriceEngineData, indexPriceEngine, isBaseRow } from "./parsePriceEngine";
-import { commonDimensions } from "./computeScenarios";
+import {
+  PriceEngineData,
+  indexPriceEngine,
+  isBaseRow,
+  pickByPriceProximity,
+} from "./parsePriceEngine";
+import { commonDimensions, useStockInKey } from "./computeScenarios";
 
 export type Verdict = "JUSTIFIED" | "MARGINAL" | "BORDERLINE" | "NOT JUSTIFIED";
 
@@ -74,7 +79,8 @@ export function computeLossLeaders(
   pe: PriceEngineData
 ): LossLeadersOutput {
   const common = commonDimensions(pe, order);
-  const peIndex = indexPriceEngine(pe, common);
+  const useStock = useStockInKey(pe, order);
+  const { buckets } = indexPriceEngine(pe, common, useStock);
 
   type Agg = {
     size: string;
@@ -99,7 +105,10 @@ export function computeLossLeaders(
     if (r.turnaround !== "Standard") continue;
     const isBase = isOrderBaseRow(r);
     const agg = get(r.size, r.qty);
-    const peRow = peIndex.get(orderRowKey(r, common));
+    const peRow = pickByPriceProximity(
+      buckets.get(orderRowKey(r, common, useStock)),
+      r.avgPaid
+    );
     const variantCost = peRow ? peRow.baseCost + peRow.finCost : r.baseCost;
     const marginPerOrder = r.avgPaid - variantCost;
     if (isBase) {

@@ -16,5 +16,9 @@ export function normalizeStock(raw: string | null | undefined): string {
 
 export function normalizeSize(raw: string | null | undefined): string {
   if (!raw) return "";
-  return String(raw).trim();
+  let s = String(raw).trim();
+  // Strip trailing ".0" from numeric components so "8.5 x 11.0" matches
+  // "8.5 x 11". Handles both " x " and "x" separators with any whitespace.
+  s = s.replace(/(\d+)\.0+\b/g, "$1");
+  return s;
 }

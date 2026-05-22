@@ -31,11 +31,11 @@ export interface PriceEngineData {
    * "coating", "scoring"] for postcards, ["binding", "cover", "pages"] for
    * booklets). */
   dimensions: string[];
+  /** True when at least one row has a non-empty Stock value. When false the
+   * file likely has no Stock column (booklets-style); the matching layer
+   * will drop stock from the lookup key on both sides. */
+  hasStock: boolean;
   rows: PriceEngineRow[];
-  /** Indexes the rows by (stock|size|qty|turnaround|...all dimensions...).
-   * For matching to an order replay with a different schema, the caller
-   * should rebuild a sub-index using the dimensional intersection of the
-   * two files. */
   warnings: string[];
 }
 
@@ -139,9 +139,20 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
   const header = aoa[0];
 
   // Required columns
-  const idxQty = findColIndex(header, ["qty", "Qty"]);
-  const idxStock = findColIndex(header, ["Stock", "PE3 Stock"]);
-  const idxSize = findColIndex(header, ["size", "Size", "PE3 Size"]);
+  const idxQty = findColIndex(header, ["qty", "Qty", "Print Qty"]);
+  const idxStock = findColIndex(header, ["Stock", "PE3 Stock"]); // optional
+  // For "size", prefer the unambiguous "Dimensions" column when it exists
+  // (booklets PE3 puts physical size in "Dimensions" and uses the "size"
+  // column for the page count instead). Fall back to "size" otherwise.
+  const idxDimensionsCol = findColIndex(header, ["Dimensions", "PE3 Dimensions"]);
+  const idxSizeCol = findColIndex(header, ["size", "Size", "PE3 Size"]);
+  const idxSize = idxDimensionsCol >= 0 ? idxDimensionsCol : idxSizeCol;
+  // If both exist, treat the "size" column as Pages — its values look like
+  // "8pg", "16pg", etc. and represent the page count dimension.
+  const idxPagesFromSize =
+    idxDimensionsCol >= 0 && idxSizeCol >= 0 && idxSizeCol !== idxDimensionsCol
+      ? idxSizeCol
+      : -1;
   const idxTurnaround = findColIndex(header, [
     "Turnaround",
     "PE3 Turnaround",
@@ -157,7 +168,6 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
 
   const required: [number, string][] = [
     [idxQty, "qty"],
-    [idxStock, "Stock"],
     [idxSize, "size"],
     [idxTurnaround, "Turnaround"],
     [idxSale, "sale price"],
@@ -166,14 +176,19 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
   for (const [i, label] of required) {
     if (i < 0) {
       throw new Error(
-        `Price engine missing required column "${label}". Required: qty, Stock, size, Turnaround, sale price, PE3 cost. ` +
-          `Dimensional columns (Coating, Bundling, Scoring, Pages, Cover, Binding, Sides, Finishing, etc.) are auto-detected — any subset is fine.`
+        `Price engine missing required column "${label}". Required: qty, size, Turnaround, sale price, PE3 cost. ` +
+          `Stock + dimensional columns (Coating, Bundling, Scoring, Pages, Cover, Binding, Sides, Finishing, etc.) are auto-detected — any subset is fine.`
       );
     }
   }
 
-  // Optional dimensions
+  // Optional dimensions — auto-detected from header aliases
   const dimIdx = detectDimensions(header);
+  // If we re-purposed the "size" column as Pages (booklets), register it
+  // here so dim discovery sees it.
+  if (idxPagesFromSize >= 0 && !("pages" in dimIdx)) {
+    dimIdx["pages"] = idxPagesFromSize;
+  }
   const dimensions = Object.keys(dimIdx).sort();
 
   // Optional auxiliary columns
@@ -201,7 +216,8 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     if (!qty) continue;
 
     const productName = (row[0] as string) || productNameFromHeader;
-    const stock = normalizeStock(row[idxStock] as string);
+    const stock =
+      idxStock >= 0 ? normalizeStock(row[idxStock] as string) : "";
     const size = normalizeSize(row[idxSize] as string);
     const rawTurnaround = String(row[idxTurnaround] ?? "");
     const turnaround = normalizeTurnaround(rawTurnaround);
@@ -251,32 +267,74 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
   }
 
   const productName = rows[0]?.productName || productNameFromHeader || sheetName;
+  const hasStock = rows.some((r) => !!r.stock);
   return {
     productName,
     productSlug: slugify(productName),
     dimensions,
+    hasStock,
     rows,
     warnings,
   };
 }
 
-/** Build a fast lookup index keyed by (required + included dims). The caller
- * provides which dimensions to include — typically the intersection of the
- * price-engine's and order-replay's dimensions. */
+/** Build a multi-valued index keyed by (required + included dims). Each
+ * bucket holds every PE3 row that matches the key — used by callers to pick
+ * the best variant for a given order (e.g. by price proximity to what the
+ * customer paid). */
 export function indexPriceEngine(
   pe: PriceEngineData,
-  includedDims: string[]
-): Map<string, PriceEngineRow> {
-  const map = new Map<string, PriceEngineRow>();
+  includedDims: string[],
+  useStock = true
+): { buckets: Map<string, PriceEngineRow[]>; collisions: number } {
+  const buckets = new Map<string, PriceEngineRow[]>();
+  let collisions = 0;
   for (const r of pe.rows) {
     const key = buildKey(
-      { stock: r.stock, size: r.size, qty: r.qty, turnaround: r.turnaround },
+      {
+        stock: useStock ? r.stock : "",
+        size: r.size,
+        qty: r.qty,
+        turnaround: r.turnaround,
+      },
       r.dims,
       includedDims
     );
-    map.set(key, r);
+    let arr = buckets.get(key);
+    if (!arr) {
+      arr = [];
+      buckets.set(key, arr);
+    } else {
+      collisions += 1;
+    }
+    arr.push(r);
   }
-  return map;
+  return { buckets, collisions };
+}
+
+/** Pick the PE3 row that best matches an order based on price proximity.
+ * Among all PE3 rows matching the order's key, choose the one whose
+ * currentSalePrice is closest to what the customer actually paid. This
+ * implicitly identifies which catalog variant the order corresponds to,
+ * even when the order replay lacks the dimensional columns needed to
+ * distinguish variants directly. */
+export function pickByPriceProximity(
+  candidates: PriceEngineRow[] | undefined,
+  paidPrice: number
+): PriceEngineRow | null {
+  if (!candidates || candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  if (paidPrice <= 0) return candidates[0];
+  let best = candidates[0];
+  let bestDiff = Math.abs(best.currentSalePrice - paidPrice);
+  for (let i = 1; i < candidates.length; i++) {
+    const d = Math.abs(candidates[i].currentSalePrice - paidPrice);
+    if (d < bestDiff) {
+      best = candidates[i];
+      bestDiff = d;
+    }
+  }
+  return best;
 }
 
 /** Identify the base catalog rows for this product. "Base" means: no

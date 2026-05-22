@@ -27,7 +27,7 @@ export interface DimensionDef {
 
 export const DIMENSIONS: readonly DimensionDef[] = [
   { key: "coating", aliases: ["Coating", "PE3 Coating"] },
-  { key: "bundling", aliases: ["Bundling", "PE3 Bundling", "Packaging"] },
+  { key: "bundling", aliases: ["Bundling", "PE3 Bundling", "Packaging", "Packaging Option"] },
   { key: "scoring", aliases: ["Scoring", "PE3 Scoring"] },
   { key: "cover", aliases: ["Cover", "PE3 Cover"] },
   { key: "binding", aliases: ["Binding", "PE3 Binding"] },

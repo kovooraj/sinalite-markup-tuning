@@ -4,6 +4,7 @@ import {
   PriceEngineData,
   PriceEngineRow,
   indexPriceEngine,
+  pickByPriceProximity,
 } from "./parsePriceEngine";
 import { bandOf } from "./qtyBands";
 
@@ -42,6 +43,11 @@ export interface ScenariosOutput {
   unmatchedSamples: string[];
   /** Dimensions used for matching — intersection of the two files. */
   commonDimensions: string[];
+  /** Number of PE3 rows that collided on the same matching key. Non-zero
+   * means the index averaged costs across multiple variants — surface to
+   * the user so they know matches are approximate. */
+  peCollisions: number;
+  useStockInKey: boolean;
 }
 
 function classifyPct(p: number): keyof ScenarioResult["dist"] {
@@ -60,20 +66,31 @@ export function commonDimensions(
   return order.dimensions.filter((d) => peSet.has(d));
 }
 
+/** Both files must have Stock for it to be used in the matching key. If
+ * either side lacks Stock, we collapse it to "" on both sides so they still
+ * match on the remaining fields. */
+export function useStockInKey(
+  pe: PriceEngineData,
+  order: OrderReplayData
+): boolean {
+  return pe.hasStock && order.hasStock;
+}
+
 export function computeAllScenarios(
   order: OrderReplayData,
   pe: PriceEngineData
 ): ScenariosOutput {
   const common = commonDimensions(pe, order);
-  const peIndex = indexPriceEngine(pe, common);
+  const useStock = useStockInKey(pe, order);
+  const { buckets, collisions } = indexPriceEngine(pe, common, useStock);
 
   const resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }> = [];
   let matched = 0;
   let unmatched = 0;
   const unmatchedSamples: string[] = [];
   for (const r of order.rows) {
-    const key = orderRowKey(r, common);
-    const peRow = peIndex.get(key) ?? null;
+    const key = orderRowKey(r, common, useStock);
+    const peRow = pickByPriceProximity(buckets.get(key), r.avgPaid);
     resolved.push({ row: r, pe: peRow });
     if (peRow) matched += 1;
     else {
@@ -93,6 +110,8 @@ export function computeAllScenarios(
     unmatchedOrderRows: unmatched,
     unmatchedSamples,
     commonDimensions: common,
+    peCollisions: collisions,
+    useStockInKey: useStock,
   };
 }
 

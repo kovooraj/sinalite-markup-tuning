@@ -37,6 +37,8 @@ export interface OrderReplayData {
   format: OrderReplayFormat;
   /** Sorted list of dimensional field keys detected. */
   dimensions: string[];
+  /** True when at least one row carries a non-empty Stock value. */
+  hasStock: boolean;
   rows: OrderReplayRow[];
   totals: {
     orders: number;
@@ -76,15 +78,15 @@ function findColIndex(
 }
 
 const COL_ALIASES = {
-  description: ["Description"],
+  description: ["Description", "Product Name", "Product"],
   qty: ["Qty", "Print Qty", "Actual Print Qty", "PE3 Qty Used"],
   qtyBand: ["Qty Band"],
   turnaround: ["Turnaround", "PE3 Turnaround", "Turnaround (Raw)"],
-  stock: ["Stock", "PE3 Stock"],
-  size: ["Size", "PE3 Size", "Size (Ordered)", "size"],
-  orders: ["Orders", "# Orders"],
-  actualPaid: ["Actual Paid $", "Total Paid", "Total Revenue"],
-  avgPaid: ["Avg Paid $", "Avg Paid", "Actual Sale Price"],
+  stock: ["Stock", "PE3 Stock"], // intentionally NOT "Product Name" — they differ semantically
+  size: ["Size", "PE3 Size", "Size (Ordered)", "Ordered Size", "size"],
+  orders: ["Orders", "# Orders", "Line Items"],
+  actualPaid: ["Actual Paid $", "Total Paid", "Total Revenue", "Net Revenue"],
+  avgPaid: ["Avg Paid $", "Avg Paid", "Actual Sale Price", "Sale Price"],
   currency: ["Currency"],
   newPricePerOrder: ["New Price/Order", "New Price"],
   newRevenue: ["New Revenue $", "New Revenue"],
@@ -126,37 +128,84 @@ function buildColMap(header: (string | number | null)[]): ColMap {
   return m;
 }
 
+/** Sheets we never want to pick as the order source, even if they happen to
+ * have some columns we recognize. */
+const SHEET_IGNORE_PATTERNS = [/^summary$/i, /^index$/i, /^readme$/i];
+
+interface SheetCandidate {
+  name: string;
+  format: OrderReplayFormat;
+  score: number;
+  rowCount: number;
+}
+
+/** Score a single sheet for "how good is this as the order-replay source?".
+ * Higher = better. Returns null if the sheet looks useless. */
+function scoreSheet(
+  wb: XLSX.WorkBook,
+  name: string
+): SheetCandidate | null {
+  if (SHEET_IGNORE_PATTERNS.some((re) => re.test(name))) return null;
+  const ws = wb.Sheets[name];
+  const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
+    header: 1,
+    defval: null,
+  });
+  if (aoa.length < 2) return null;
+  const m = buildColMap(aoa[0]);
+  if (m.qty < 0 || m.size < 0 || m.avgPaid < 0) return null;
+
+  // Aggregated format wins big if it has the pre-computed New Price column
+  if (m.orders >= 0 && m.newPricePerOrder >= 0) {
+    return {
+      name,
+      format: "per_sku_aggregated",
+      score: 100 + (aoa.length - 1),
+      rowCount: aoa.length - 1,
+    };
+  }
+  // Per-order detail: score = column richness + row count
+  let s = 10;
+  if (m.stock >= 0) s += 5;
+  if (m.turnaround >= 0) s += 3;
+  if (m.currency >= 0) s += 2;
+  if (m.description >= 0) s += 1;
+  s += aoa.length - 1; // more rows = better signal
+  return {
+    name,
+    format: "per_order_detail",
+    score: s,
+    rowCount: aoa.length - 1,
+  };
+}
+
 function chooseSheet(
   wb: XLSX.WorkBook
 ): { sheetName: string; format: OrderReplayFormat } | null {
-  const names = wb.SheetNames;
-  if (names.includes("Per-SKU Detail")) {
-    return { sheetName: "Per-SKU Detail", format: "per_sku_aggregated" };
-  }
-  if (names.includes("Matched Orders (Price Analysis)")) {
-    return {
-      sheetName: "Matched Orders (Price Analysis)",
-      format: "per_order_detail",
-    };
-  }
-  if (names.length >= 1) {
-    const first = wb.Sheets[names[0]];
-    const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(first, {
-      header: 1,
-      defval: null,
-    });
-    if (aoa.length > 0) {
-      const header = aoa[0];
-      const m = buildColMap(header);
-      if (m.orders >= 0 && m.avgPaid >= 0 && m.newPricePerOrder >= 0) {
-        return { sheetName: names[0], format: "per_sku_aggregated" };
-      }
-      if (m.avgPaid >= 0 && m.qty >= 0 && m.stock >= 0 && m.size >= 0) {
-        return { sheetName: names[0], format: "per_order_detail" };
+  // First, prefer the canonical Sinalite sheet names if present
+  const canonical: { name: string; format: OrderReplayFormat }[] = [
+    { name: "Per-SKU Detail", format: "per_sku_aggregated" },
+    { name: "Matched Orders (Price Analysis)", format: "per_order_detail" },
+    { name: "All Orders + PE3 Match", format: "per_order_detail" },
+    { name: "All Orders", format: "per_order_detail" },
+  ];
+  for (const c of canonical) {
+    if (wb.SheetNames.includes(c.name)) {
+      // Confirm the canonical sheet has plausible columns, otherwise fall
+      // through to scoring.
+      const score = scoreSheet(wb, c.name);
+      if (score) {
+        return { sheetName: c.name, format: c.format };
       }
     }
   }
-  return null;
+  // Score every sheet; pick the best.
+  const candidates = wb.SheetNames.map((n) => scoreSheet(wb, n)).filter(
+    (c): c is SheetCandidate => c !== null
+  );
+  candidates.sort((a, b) => b.score - a.score);
+  if (candidates.length === 0) return null;
+  return { sheetName: candidates[0].name, format: candidates[0].format };
 }
 
 function readDims(
@@ -189,7 +238,7 @@ function rowsForPerSku(
     const qty = toNumber(row[m.qty]);
     if (!qty) continue;
     const turnaround = normalizeTurnaround(toStr(row[m.turnaround]));
-    const stock = normalizeStock(toStr(row[m.stock]));
+    const stock = m.stock >= 0 ? normalizeStock(toStr(row[m.stock])) : "";
     const size = normalizeSize(toStr(row[m.size]));
     const orders = toNumber(row[m.orders]);
     const actualPaid = toNumber(row[m.actualPaid]);
@@ -244,9 +293,9 @@ function rowsForPerOrder(
     if (!row || row.length === 0) continue;
     const qty = toNumber(row[m.qty]);
     if (!qty) continue;
-    const stock = normalizeStock(toStr(row[m.stock]));
+    const stock = m.stock >= 0 ? normalizeStock(toStr(row[m.stock])) : "";
     const size = normalizeSize(toStr(row[m.size]));
-    if (!stock || !size) continue;
+    if (!size) continue;
     const turnaround = normalizeTurnaround(toStr(row[m.turnaround]));
     let salePrice = toNumber(row[m.avgPaid]);
     if (!salePrice) continue;
@@ -346,10 +395,16 @@ function countUnmatchedFromExtraSheets(
   const reasons = new Set<string>();
   let count = 0;
   let revenue = 0;
+  // Only count sheets that are unambiguously unmatched. Generic "Rush Orders"
+  // (without the "(No PE3 Match)" suffix) is often a duplicate listing of the
+  // main sheet rather than an unmatched bucket, so we don't include it here.
   const candidates = [
     "Custom Sizes (No PE3 Match)",
     "Rush Orders (No PE3 Match)",
     "Other Unmatched",
+    "Custom Sizes",
+    "Unmatched Orders",
+    "Unmatched",
   ];
   for (const name of candidates) {
     if (!wb.SheetNames.includes(name)) continue;
@@ -402,12 +457,11 @@ export async function parseOrderReplay(
   const dimIdx = detectDimensions(aoa[0]);
   const dimensions = Object.keys(dimIdx).sort();
 
-  // Required-column guard per format
+  // Required-column guard per format. Stock is OPTIONAL — many product files
+  // omit it because the file is scoped to one product variant.
   if (format === "per_sku_aggregated") {
     const required: [keyof ColMap, string][] = [
       ["qty", "Qty"],
-      ["turnaround", "Turnaround"],
-      ["stock", "Stock"],
       ["size", "Size"],
       ["orders", "Orders"],
       ["avgPaid", "Avg Paid $"],
@@ -420,9 +474,8 @@ export async function parseOrderReplay(
   } else {
     const required: [keyof ColMap, string][] = [
       ["qty", "Qty / Print Qty"],
-      ["stock", "Stock / PE3 Stock"],
       ["size", "Size / PE3 Size"],
-      ["avgPaid", "Actual Sale Price / Avg Paid"],
+      ["avgPaid", "Actual Sale Price / Avg Paid / Sale Price"],
     ];
     for (const [k, label] of required) {
       if (m[k] < 0) {
@@ -464,6 +517,7 @@ export async function parseOrderReplay(
   return {
     format,
     dimensions,
+    hasStock: result.rows.some((r) => !!r.stock),
     rows: result.rows,
     totals: {
       orders: result.totals.orders,
@@ -482,11 +536,20 @@ export async function parseOrderReplay(
 }
 
 /** Convenience: build a lookup key for an order-replay row using the given
- * dimension subset. Caller is expected to use the intersection of
- * priceEngine.dimensions and orderReplay.dimensions. */
-export function orderRowKey(r: OrderReplayRow, includedDims: string[]): string {
+ * dimension subset. If `useStock` is false the stock field is collapsed to
+ * "" so PE and order keys still match when one side lacks a Stock column. */
+export function orderRowKey(
+  r: OrderReplayRow,
+  includedDims: string[],
+  useStock = true
+): string {
   return buildKey(
-    { stock: r.stock, size: r.size, qty: r.qty, turnaround: r.turnaround },
+    {
+      stock: useStock ? r.stock : "",
+      size: r.size,
+      qty: r.qty,
+      turnaround: r.turnaround,
+    },
     r.dims,
     includedDims
   );

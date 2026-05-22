@@ -106,6 +106,16 @@ function computeSanity(
       `Scenario A revenue impact: ${(a.pctDelta * 100).toFixed(2)}% — outside the pilot ±3% comfort band.`
     );
   }
+  if (scenarios.peCollisions > 0) {
+    warnings.push(
+      `Matching is approximate: ${scenarios.peCollisions} PE3 row${scenarios.peCollisions === 1 ? "" : "s"} collided on the same matching key (the order replay doesn't carry enough dimensional columns to differentiate them). Costs were averaged across the colliding variants.`
+    );
+  }
+  if (scenarios.commonDimensions.length === 0 && pe.dimensions.length > 0) {
+    warnings.push(
+      `Zero dimensional overlap between price engine (${pe.dimensions.join(", ")}) and order replay (${order.dimensions.join(", ") || "no detected dimensions"}). Matching uses size, qty, and turnaround only — consider adding ${pe.dimensions.join(" / ")} columns to the order replay for precise SKU-level analysis.`
+    );
+  }
   if (a && a.dist.noChange < 0.3) {
     warnings.push(
       `Customer "no change" share: ${(a.dist.noChange * 100).toFixed(1)}% — cap rule may not be applying correctly.`
