@@ -3,6 +3,8 @@
 import { ScenariosOutput } from "@/lib/computeScenarios";
 import { SelfCheckResult } from "@/lib/selfCheck";
 import { Recommendation } from "@/lib/recommend";
+import { SCENARIO_BY_ID } from "@/lib/markupEngine";
+import { InfoIcon } from "./InfoIcon";
 
 interface Props {
   productName: string;
@@ -48,14 +50,33 @@ export function ResultsPanel(props: Props) {
             ? `· ${scenarios.unmatchedOrderRows} replay rows had no price-engine match`
             : ""}
         </li>
-        {recommendation.recommended && (
-          <li>
-            📌 Recommended: <span className="font-semibold">{recommendation.recommended.id}</span>{" "}
-            ({fmtUsd(recommendation.recommended.deltaUsd)} ·{" "}
-            {fmtPct(recommendation.recommended.pctDelta)}) — {recommendation.reason}
-          </li>
-        )}
       </ul>
+
+      {recommendation.recommended && (
+        <div className="mt-4 rounded border border-green-300 bg-green-50 p-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-green-900">
+              📌 Recommended:
+            </span>
+            <span className="font-mono text-base font-bold text-green-900">
+              {recommendation.recommended.id}
+            </span>
+            <span className="text-sm text-green-900">
+              Δ {fmtUsd(recommendation.recommended.deltaUsd)} ·{" "}
+              {fmtPct(recommendation.recommended.pctDelta)} · annualized{" "}
+              {fmtUsd(recommendation.recommended.annualizedUsd)}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-green-900 leading-relaxed">
+            <span className="font-semibold">Why: </span>
+            {recommendation.reason}
+          </p>
+          <p className="mt-1 text-[11px] text-green-800/70 italic">
+            Source: sinalite-pricing-model SOP · Recommendation Heuristic ·{" "}
+            {recommendation.inBand.length} of 8 scenarios in your target band.
+          </p>
+        </div>
+      )}
 
       {props.sanity.length > 0 && (
         <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -92,7 +113,14 @@ export function ResultsPanel(props: Props) {
                   key={s.id}
                   className={isRecommended ? "bg-green-50" : inBand ? "bg-zinc-50" : ""}
                 >
-                  <td className="border border-zinc-200 px-2 py-1 font-mono">{s.id}</td>
+                  <td className="border border-zinc-200 px-2 py-1 font-mono">
+                    <span className="inline-flex items-center">
+                      <span>{s.id}</span>
+                      {SCENARIO_BY_ID[s.id]?.description && (
+                        <InfoIcon text={SCENARIO_BY_ID[s.id].description} />
+                      )}
+                    </span>
+                  </td>
                   <td className="border border-zinc-200 px-2 py-1">{s.baseFormatted}</td>
                   <td className="border border-zinc-200 px-2 py-1">{s.finFormatted}</td>
                   <td className="border border-zinc-200 px-2 py-1">{s.nbdFormatted}</td>
