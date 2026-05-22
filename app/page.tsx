@@ -102,7 +102,6 @@ export default function Home() {
     owner: "",
     targetMinPct: -0.01,
     targetMaxPct: 0.005,
-    repriceScenarioId: "A_Current_Locked",
     usdRate: 0.7,
   });
 
@@ -181,13 +180,13 @@ export default function Home() {
     }
   }
 
-  async function handleDownloadRepriced() {
+  async function handleDownloadRepriced(scenarioId: string) {
     if (!computed) return;
     setGenerating(true);
     try {
       await downloadRepricedXlsx({
         pe: computed.pe,
-        scenarioId: meta.repriceScenarioId,
+        scenarioId,
         usdRate: meta.usdRate || 0.7,
       });
     } finally {

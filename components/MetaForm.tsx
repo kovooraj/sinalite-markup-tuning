@@ -1,14 +1,12 @@
 "use client";
 
 import { InfoIcon } from "./InfoIcon";
-import { SCENARIOS } from "@/lib/markupEngine";
 
 export interface MetaFormValues {
   lockedDate: string;
   owner: string;
   targetMinPct: number;
   targetMaxPct: number;
-  repriceScenarioId: string;
   usdRate: number;
 }
 
@@ -26,10 +24,8 @@ const TIPS = {
     "Lower bound of the acceptable revenue-impact band (per finance — typically −1%). Scenarios with 3-mo %Δ below this are tagged “Outside”. Does not change the numbers in the output files; only drives the recommendation badge in the results panel.",
   targetMax:
     "Upper bound of the acceptable revenue-impact band (typically +0.5%). Scenarios within [min, max] are tagged “In band”, and the one with the smallest customer-impact drift vs Scenario A gets the “★ Recommended” star. Output files are unchanged.",
-  repriceScenario:
-    "Which markup scenario to apply to the Repriced Catalog .xlsx. Defaults to A_Current_Locked (the May 2026 decision). Pick a tuning scenario (B–H) only if you want to see what catalog prices would look like under that gradient.",
   usdRate:
-    "CAD → USD multiplier used in the Repriced Catalog. New Price USD = New Price CAD × this rate. Default 0.70. The column header in the xlsx echoes the rate (e.g. “New Price USD (@0.70)”).",
+    "CAD → USD multiplier used in every Repriced Catalog download. New Price USD = New Price CAD × this rate. Default 0.70. The column header in each xlsx echoes the rate (e.g. “New Price USD (@0.70)”).",
 };
 
 export function MetaForm({ values, onChange }: Props) {
@@ -89,24 +85,7 @@ export function MetaForm({ values, onChange }: Props) {
           className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
         />
       </label>
-      <label className="text-sm">
-        <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
-          <span>Reprice scenario</span>
-          <InfoIcon text={TIPS.repriceScenario} />
-        </div>
-        <select
-          value={values.repriceScenarioId}
-          onChange={(e) => set("repriceScenarioId", e.target.value)}
-          className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm"
-        >
-          {SCENARIOS.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.id} — {s.baseFormatted} base / {s.finFormatted} fin / {s.nbdFormatted} NBD
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="text-sm">
+      <label className="text-sm md:col-span-2">
         <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
           <span>USD rate (CAD × rate)</span>
           <InfoIcon text={TIPS.usdRate} />

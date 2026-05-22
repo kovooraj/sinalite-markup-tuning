@@ -16,7 +16,7 @@ interface Props {
   generating: boolean;
   onDownloadOnePager: () => void;
   onDownloadScenarios: () => void;
-  onDownloadRepriced: () => void;
+  onDownloadRepriced: (scenarioId: string) => void;
 }
 
 function fmtUsd(v: number): string {
@@ -80,6 +80,7 @@ export function ResultsPanel(props: Props) {
               <th className="border border-zinc-200 px-2 py-1 text-right">% Δ</th>
               <th className="border border-zinc-200 px-2 py-1 text-right">Annualized</th>
               <th className="border border-zinc-200 px-2 py-1">Status</th>
+              <th className="border border-zinc-200 px-2 py-1">Repriced Catalog</th>
             </tr>
           </thead>
           <tbody>
@@ -107,6 +108,22 @@ export function ResultsPanel(props: Props) {
                   <td className="border border-zinc-200 px-2 py-1">
                     {isRecommended ? "★ Recommended" : inBand ? "✓ In band" : "— Outside"}
                   </td>
+                  <td className="border border-zinc-200 px-2 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => props.onDownloadRepriced(s.id)}
+                      disabled={props.generating}
+                      className={[
+                        "rounded px-2 py-1 text-xs font-medium text-white disabled:opacity-50",
+                        isRecommended
+                          ? "bg-green-600 hover:bg-green-700"
+                          : "bg-zinc-700 hover:bg-zinc-800",
+                      ].join(" ")}
+                      title={`Download repriced catalog using ${s.id}`}
+                    >
+                      {isRecommended ? "⬇ ★ Download" : "⬇ Download"}
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -131,15 +148,12 @@ export function ResultsPanel(props: Props) {
         >
           ⬇ Download Scenarios (.xlsx)
         </button>
-        <button
-          type="button"
-          onClick={props.onDownloadRepriced}
-          disabled={props.generating}
-          className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
-        >
-          ⬇ Download Repriced Catalog (.xlsx)
-        </button>
       </div>
+      <p className="mt-2 text-xs text-zinc-500">
+        Repriced catalog per scenario: click the ⬇ button on any row above. The
+        ★ green row is the system's pick (best fit to your target band with
+        smallest customer-impact drift).
+      </p>
     </div>
   );
 }
