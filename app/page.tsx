@@ -239,9 +239,9 @@ export default function Home() {
       <section className="space-y-5">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <FileDrop
-            label="Price Engine .xlsx"
+            label="Price Engine (.xlsx or .csv)"
             hint="Sample SKU catalog with PE3 cost decomposition"
-            info="The full SKU catalog for one product — every (size × qty × turnaround × bundling × scoring) variant with its current sale price and a per-machine cost breakdown. Drives: cost-per-SKU lookup, base catalog impact stat, finishing-premium impact stat, and the 12-mo NBD lift narrative."
+            info="The full SKU catalog for one product — every (size × qty × turnaround × bundling × scoring) variant with its current sale price and a per-machine cost breakdown. Accepts .xlsx or a single-sheet .csv export. Drives: cost-per-SKU lookup, base catalog impact stat, finishing-premium impact stat, and the 12-mo NBD lift narrative."
             file={priceFile}
             onSelect={(f) => {
               setPriceFile(f);
@@ -251,9 +251,9 @@ export default function Home() {
             error={priceErr}
           />
           <FileDrop
-            label="3-Month Order Replay .xlsx"
-            hint={`Must contain "Per-SKU Detail" sheet from the replay script`}
-            info="The output of replay_orders.py — must contain a 'Per-SKU Detail' sheet with the last 3 months of orders aggregated by SKU and quantity. Drives: all 8 scenario revenue deltas, customer-impact distribution, loss-leader verdict table, and the self-check warning if the cost / order data don't line up."
+            label="3-Month Order Replay (.xlsx or .csv)"
+            hint={`xlsx with "Per-SKU Detail" sheet, or a CSV of that sheet on its own`}
+            info="The output of replay_orders.py. For xlsx: must contain a 'Per-SKU Detail' sheet (plus optional Summary + Unmatched). For CSV: export only the Per-SKU Detail rows on their own. Drives: all 8 scenario revenue deltas, customer-impact distribution, loss-leader verdict table, and the self-check warning if the cost / order data don't line up."
             file={orderFile}
             onSelect={(f) => {
               setOrderFile(f);

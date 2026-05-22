@@ -129,8 +129,8 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
   if (aoa.length < 2) throw new Error("Price engine xlsx has no data rows.");
 
   const header = aoa[0];
-  // Validate expected leading columns
-  const expectedHeaders = [
+  // Required headers — every parse-able row needs these
+  const requiredHeaders = [
     "qty",
     "Stock",
     "Coating",
@@ -140,19 +140,26 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     "Scoring",
     "sale price",
     "PE3 cost no markup",
-    "Consolidated Markup",
   ];
+  // Optional headers — used for sanity warnings; absence is non-fatal
+  const optionalHeaders = ["Consolidated Markup", "PE3 cost"];
   const idx: Record<string, number> = {};
-  for (const name of expectedHeaders) {
+  for (const name of requiredHeaders) {
     const i = header.findIndex(
       (h) => typeof h === "string" && h.trim().toLowerCase() === name.toLowerCase()
     );
     if (i < 0) {
       throw new Error(
-        `Price engine missing column "${name}". Expected columns include: ${expectedHeaders.join(", ")}.`
+        `Price engine missing column "${name}". Expected columns include: ${requiredHeaders.join(", ")}.`
       );
     }
     idx[name] = i;
+  }
+  for (const name of optionalHeaders) {
+    const i = header.findIndex(
+      (h) => typeof h === "string" && h.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (i >= 0) idx[name] = i;
   }
   // breakdown columns start at "breakdown" header if present, else col 11 (index 11)
   let breakdownStart = header.findIndex(
@@ -185,7 +192,12 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     const scoring = normalizeScoring(row[idx["Scoring"]] as string);
     const currentSalePrice = toNumber(row[idx["sale price"]]);
     const pe3CostTotal = toNumber(row[idx["PE3 cost no markup"]]);
-    const consolidatedMarkup = toNumber(row[idx["Consolidated Markup"]]);
+    const consolidatedMarkup =
+      idx["Consolidated Markup"] !== undefined
+        ? toNumber(row[idx["Consolidated Markup"]])
+        : pe3CostTotal > 0
+          ? currentSalePrice / pe3CostTotal
+          : 0;
 
     const breakdownCells = row.slice(breakdownStart);
     const { baseCost, finCost } = extractCostBreakdown(breakdownCells);

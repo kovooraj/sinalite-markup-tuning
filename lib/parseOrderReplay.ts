@@ -81,12 +81,21 @@ const EXPECTED_COLS = [
 export async function parseOrderReplay(file: File): Promise<OrderReplayData> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
-  if (!wb.SheetNames.includes("Per-SKU Detail")) {
+  // Prefer the "Per-SKU Detail" sheet (multi-sheet xlsx). If absent and there
+  // is only one sheet (typical for CSV uploads), use it as the source.
+  let sheetName: string | undefined;
+  if (wb.SheetNames.includes("Per-SKU Detail")) {
+    sheetName = "Per-SKU Detail";
+  } else if (wb.SheetNames.length === 1) {
+    sheetName = wb.SheetNames[0];
+  }
+  if (!sheetName) {
     throw new Error(
-      `Order replay missing "Per-SKU Detail" sheet. Sheets found: ${wb.SheetNames.join(", ")}`
+      `Order replay missing "Per-SKU Detail" sheet. Sheets found: ${wb.SheetNames.join(", ")}. ` +
+        `For a CSV upload, export only the Per-SKU Detail tab so it's the single sheet in the file.`
     );
   }
-  const ws = wb.Sheets["Per-SKU Detail"];
+  const ws = wb.Sheets[sheetName];
   const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
     header: 1,
     raw: true,

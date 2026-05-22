@@ -27,6 +27,8 @@ export function FileDrop({ label, hint, info, file, onSelect, preview, error }: 
     accept: {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
       "application/vnd.ms-excel": [".xls"],
+      "text/csv": [".csv"],
+      "application/csv": [".csv"],
     },
   });
 
