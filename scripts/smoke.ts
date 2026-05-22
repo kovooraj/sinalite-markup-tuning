@@ -6,6 +6,7 @@ import { parsePriceEngine } from "../lib/parsePriceEngine";
 import { parseOrderReplay } from "../lib/parseOrderReplay";
 import { computeAllScenarios } from "../lib/computeScenarios";
 import { runSelfCheck } from "../lib/selfCheck";
+import { recommend } from "../lib/recommend";
 import {
   computeBaseCatalogImpact,
   computeFinishingCatalogImpact,
@@ -140,10 +141,18 @@ if (ll.callout) {
 
 await mkdir("out", { recursive: true });
 
+const targetMinPct = -0.01;
+const targetMaxPct = 0.005;
+const rec = recommend(scenarios.scenarios, { targetMinPct, targetMaxPct });
+console.log(`\nRecommendation: ${rec.recommended?.id ?? "—"} — ${rec.reason}`);
+
 const scXlsx = await buildScenariosXlsx({
   productName: pe.productName,
   productSlug: pe.productSlug,
   results: scenarios.scenarios,
+  recommendation: rec,
+  targetMinPct,
+  targetMaxPct,
 });
 await writeFile(
   `out/${pe.productSlug}_Markup_Tuning_Scenarios.xlsx`,
@@ -159,6 +168,9 @@ const docxBlob = await buildOnePagerDocx({
   finImpact,
   nbdLift: nbd,
   lossLeaders: ll,
+  recommendation: rec,
+  targetMinPct,
+  targetMaxPct,
 });
 await writeFile(
   `out/${pe.productSlug}_Markup_Reference_OnePager.docx`,

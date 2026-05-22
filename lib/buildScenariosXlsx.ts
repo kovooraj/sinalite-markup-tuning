@@ -2,11 +2,15 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { ScenarioResult } from "./computeScenarios";
 import { BASE_BAND_LABELS } from "./qtyBands";
+import { Recommendation } from "./recommend";
 
 export interface BuildScenariosOpts {
   productName: string;
   productSlug: string;
   results: ScenarioResult[];
+  recommendation: Recommendation;
+  targetMinPct: number;
+  targetMaxPct: number;
 }
 
 const CURRENCY_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)';
@@ -60,7 +64,8 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
   ws.getRow(4).font = { bold: true };
   ws.getRow(4).alignment = { horizontal: "left" };
 
-  // R5..R12: per-scenario rows
+  // R5..R12: per-scenario rows — highlight the recommended scenario in yellow
+  const recommendedId = opts.recommendation.recommended?.id;
   opts.results.forEach((s, i) => {
     const r = 5 + i;
     ws.getRow(r).values = [
@@ -76,6 +81,18 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
     ws.getCell(`F${r}`).numFmt = CURRENCY_FMT;
     ws.getCell(`G${r}`).numFmt = PCT_FMT;
     ws.getCell(`H${r}`).numFmt = CURRENCY_FMT;
+    if (s.id === recommendedId) {
+      const yellow: ExcelJS.FillPattern = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFF2CC" },
+      };
+      for (const col of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
+        const cell = ws.getCell(`${col}${r}`);
+        cell.fill = yellow;
+        cell.font = { ...(cell.font ?? {}), bold: true };
+      }
+    }
   });
 
   // R15: Customer Impact Distribution title
@@ -129,6 +146,31 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
       ws.getCell(`${col}${r}`).numFmt = CURRENCY_FMT;
     }
   });
+
+  // R39+: Recommendation block — pick + SOP-aligned reasoning
+  const rec = opts.recommendation;
+  const recRow = rec.recommended;
+  const targetBandStr = `[${(opts.targetMinPct * 100).toFixed(1)}%, ${(opts.targetMaxPct * 100).toFixed(1)}%]`;
+  ws.mergeCells("A39:H39");
+  ws.getCell("A39").value = "Recommendation (per sinalite-pricing-model SOP)";
+  ws.getCell("A39").font = { bold: true, size: 12 };
+
+  ws.mergeCells("A40:H40");
+  ws.getCell("A40").value = `Target band: ${targetBandStr} · ${rec.inBand.length} of 8 scenarios in band`;
+  ws.getCell("A40").font = { italic: true, color: { argb: "FF555555" } };
+
+  if (recRow) {
+    ws.mergeCells("A41:H41");
+    ws.getCell("A41").value = `Pick: ${recRow.id} — Δ ${recRow.deltaUsd >= 0 ? "+" : "−"}$${Math.abs(recRow.deltaUsd).toLocaleString("en-US", { maximumFractionDigits: 0 })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${recRow.annualizedUsd >= 0 ? "+" : "−"}$${Math.abs(recRow.annualizedUsd).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    ws.getCell("A41").font = { bold: true };
+  }
+
+  ws.mergeCells("A42:H44");
+  ws.getCell("A42").value = rec.reason;
+  ws.getCell("A42").alignment = { wrapText: true, vertical: "top" };
+  ws.getRow(42).height = 18;
+  ws.getRow(43).height = 18;
+  ws.getRow(44).height = 18;
 
   const buffer = await wb.xlsx.writeBuffer();
   return new Blob([buffer as ArrayBuffer], {

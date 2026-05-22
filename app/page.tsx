@@ -177,6 +177,9 @@ export default function Home() {
         productName: computed.pe.productName,
         productSlug: computed.pe.productSlug,
         results: computed.scenarios.scenarios,
+        recommendation: computed.recommendation,
+        targetMinPct: meta.targetMinPct,
+        targetMaxPct: meta.targetMaxPct,
       });
     } finally {
       setGenerating(false);
@@ -210,6 +213,9 @@ export default function Home() {
         finImpact: computed.finImpact,
         nbdLift: computed.nbdLift,
         lossLeaders: computed.lossLeaders,
+        recommendation: computed.recommendation,
+        targetMinPct: meta.targetMinPct,
+        targetMaxPct: meta.targetMaxPct,
       });
     } finally {
       setGenerating(false);

@@ -18,6 +18,7 @@ import { saveAs } from "file-saver";
 import { BaseCatalogImpact, FinishingCatalogImpact, NbdLift } from "./catalogImpact";
 import { LossLeadersOutput } from "./lossLeaders";
 import { SCENARIO_BY_ID } from "./markupEngine";
+import { Recommendation } from "./recommend";
 
 export interface OnePagerOpts {
   productName: string;
@@ -28,6 +29,9 @@ export interface OnePagerOpts {
   finImpact: FinishingCatalogImpact;
   nbdLift: NbdLift;
   lossLeaders: LossLeadersOutput;
+  recommendation: Recommendation;
+  targetMinPct: number;
+  targetMaxPct: number;
 }
 
 function fmtUsd(v: number, opts: { signed?: boolean; abs?: boolean } = {}): string {
@@ -196,6 +200,63 @@ export async function buildOnePagerDocx(opts: OnePagerOpts): Promise<Blob> {
       })} of the loss alone. Structurally unprofitable even with add-ons. Flagged for Q3 pricing review.`
     : "";
 
+  // Build Recommendation table — recommended scenario + in-band alternatives
+  const rec = opts.recommendation;
+  const recRow = rec.recommended;
+  const recPctStr = recRow ? `${(recRow.pctDelta * 100).toFixed(2)}%` : "—";
+  const recDeltaStr = recRow ? fmtUsd(recRow.deltaUsd, { signed: true }) : "—";
+  const recAnnualStr = recRow ? fmtUsd(recRow.annualizedUsd, { signed: true }) : "—";
+  const targetBandStr = `[${(opts.targetMinPct * 100).toFixed(1)}%, ${(opts.targetMaxPct * 100).toFixed(1)}%]`;
+
+  // Detect which SOP rule fired
+  const aInBand = rec.inBand.some((s) => s.id === "A_Current_Locked");
+  let sopRule = "";
+  if (aInBand && recRow?.id === "A_Current_Locked") {
+    sopRule =
+      "SOP Rule 1: When A_Current_Locked is in the target band, ship A. Customer impact distribution is already measured and operationally approved.";
+  } else if (recRow?.id === "F_Aggressive") {
+    sopRule =
+      "SOP Rule 2: A_Current_Locked is outside target. F_Aggressive is the SOP pick when finance wants revenue-positive — base/finishing/NBD all lift +5pt.";
+  } else if (recRow?.id === "E_Combined_Mod") {
+    sopRule =
+      "SOP Rule 3: A_Current_Locked is outside target. E_Combined_Mod is the SOP pick when finance wants revenue-positive with minimal customer-impact shift.";
+  } else if (rec.inBand.length === 0) {
+    sopRule =
+      "No scenario fully within target band. Pick is the closest to the band; consider widening the band or revisiting cost assumptions.";
+  } else {
+    sopRule = `${recRow?.id ?? "—"} is in target band; A is outside and the SOP's revenue-positive picks (F, E) are not available.`;
+  }
+
+  // Alternatives table — show every in-band scenario sorted by %Δ ascending
+  const altScenarios = [...rec.inBand].sort((a, b) => a.pctDelta - b.pctDelta);
+  const altHeader = headerRow([
+    "Scenario",
+    "Base",
+    "Finishing",
+    "NBD",
+    "3-mo Δ",
+    "% Δ",
+    "Status",
+  ]);
+  const altRows = altScenarios.map((s) => {
+    const isPick = s.id === recRow?.id;
+    return new TableRow({
+      children: [
+        cell(s.id, { bold: isPick }),
+        cell(s.baseFormatted),
+        cell(s.finFormatted),
+        cell(s.nbdFormatted),
+        cell(fmtUsd(s.deltaUsd, { signed: true })),
+        cell(`${(s.pctDelta * 100).toFixed(2)}%`),
+        cell(isPick ? "★ Recommended" : "✓ In band", { bold: isPick }),
+      ],
+    });
+  });
+  const altTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [altHeader, ...altRows],
+  });
+
   const doc = new Document({
     creator: "SinaLite Markup Tuning",
     title: `${opts.productName} — Markup Reference`,
@@ -281,6 +342,22 @@ export async function buildOnePagerDocx(opts: OnePagerOpts): Promise<Blob> {
           llTable,
           ...(calloutText
             ? [paragraph(calloutText, { italic: true, spacing: 80 })]
+            : []),
+
+          sectionHeading("5. RECOMMENDED SCENARIO"),
+          paragraph(
+            `Target band: ${targetBandStr}. ${rec.inBand.length} of 8 scenarios fall inside this band.`
+          ),
+          paragraph(
+            `Recommended: ${recRow?.id ?? "—"} — Δ ${recDeltaStr} (${recPctStr}) over 3 months, annualized ${recAnnualStr}.`,
+            { bold: true }
+          ),
+          paragraph(sopRule, { italic: true, spacing: 80 }),
+          ...(altScenarios.length > 0
+            ? [
+                paragraph("In-band alternatives (sorted by % Δ):", { spacing: 40 }),
+                altTable,
+              ]
             : []),
 
           new Paragraph({
