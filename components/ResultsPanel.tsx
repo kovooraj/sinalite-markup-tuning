@@ -16,6 +16,7 @@ interface Props {
   generating: boolean;
   onDownloadOnePager: () => void;
   onDownloadScenarios: () => void;
+  onDownloadRepriced: () => void;
 }
 
 function fmtUsd(v: number): string {
@@ -129,6 +130,14 @@ export function ResultsPanel(props: Props) {
           className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
         >
           ⬇ Download Scenarios (.xlsx)
+        </button>
+        <button
+          type="button"
+          onClick={props.onDownloadRepriced}
+          disabled={props.generating}
+          className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+        >
+          ⬇ Download Repriced Catalog (.xlsx)
         </button>
       </div>
     </div>

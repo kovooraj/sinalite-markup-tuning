@@ -14,6 +14,7 @@ import {
 import { computeLossLeaders } from "../lib/lossLeaders";
 import { buildScenariosXlsx } from "../lib/buildScenariosXlsx";
 import { buildOnePagerDocx } from "../lib/buildOnePagerDocx";
+import { buildRepricedXlsx } from "../lib/buildRepricedXlsx";
 
 const PRICE_FILE =
   process.argv[2] ??
@@ -166,6 +167,17 @@ await writeFile(
 
 console.log(`\nWrote out/${pe.productSlug}_Markup_Tuning_Scenarios.xlsx`);
 console.log(`Wrote out/${pe.productSlug}_Markup_Reference_OnePager.docx`);
+
+const repBlob = await buildRepricedXlsx({
+  pe,
+  scenarioId: "A_Current_Locked",
+  usdRate: 0.70,
+});
+await writeFile(
+  `out/${pe.productSlug}_Repriced.xlsx`,
+  Buffer.from(await repBlob.arrayBuffer())
+);
+console.log(`Wrote out/${pe.productSlug}_Repriced.xlsx`);
 }
 
 main().catch((e) => {

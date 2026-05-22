@@ -17,6 +17,7 @@ import {
 import { computeLossLeaders } from "@/lib/lossLeaders";
 import { downloadScenariosXlsx } from "@/lib/buildScenariosXlsx";
 import { downloadOnePagerDocx } from "@/lib/buildOnePagerDocx";
+import { downloadRepricedXlsx } from "@/lib/buildRepricedXlsx";
 
 interface ComputedState {
   pe: PriceEngineData;
@@ -101,6 +102,8 @@ export default function Home() {
     owner: "",
     targetMinPct: -0.01,
     targetMaxPct: 0.005,
+    repriceScenarioId: "A_Current_Locked",
+    usdRate: 0.7,
   });
 
   const canGenerate = !!priceFile && !!orderFile && !generating;
@@ -172,6 +175,20 @@ export default function Home() {
         productName: computed.pe.productName,
         productSlug: computed.pe.productSlug,
         results: computed.scenarios.scenarios,
+      });
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleDownloadRepriced() {
+    if (!computed) return;
+    setGenerating(true);
+    try {
+      await downloadRepricedXlsx({
+        pe: computed.pe,
+        scenarioId: meta.repriceScenarioId,
+        usdRate: meta.usdRate || 0.7,
       });
     } finally {
       setGenerating(false);
@@ -281,6 +298,7 @@ export default function Home() {
             generating={generating}
             onDownloadOnePager={handleDownloadOnePager}
             onDownloadScenarios={handleDownloadScenarios}
+            onDownloadRepriced={handleDownloadRepriced}
           />
         )}
       </section>
