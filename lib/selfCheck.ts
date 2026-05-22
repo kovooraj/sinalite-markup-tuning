@@ -20,6 +20,21 @@ export function runSelfCheck(
   order: OrderReplayData,
   pe: PriceEngineData
 ): SelfCheckResult {
+  // Per-order detail inputs don't carry a pre-computed Scenario A column,
+  // so there's nothing to diff against. Return a skipped result.
+  if (!order.hasPrecomputedScenarioA) {
+    return {
+      scenarioAComputedDelta: 0,
+      scenarioAReplayDelta: 0,
+      aggregateDiff: 0,
+      maxRowDiff: 0,
+      rowsCompared: 0,
+      rowsMissed: 0,
+      ok: true,
+      message:
+        "Self-check skipped — per-order detail input has no pre-computed Scenario A column to diff against.",
+    };
+  }
   const scenarioA = SCENARIO_BY_ID["A_Current_Locked"];
   let totalDelta = 0;
   let maxRowDiff = 0;

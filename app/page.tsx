@@ -123,7 +123,7 @@ export default function Home() {
       }
       let order: OrderReplayData;
       try {
-        order = await parseOrderReplay(orderFile);
+        order = await parseOrderReplay(orderFile, { usdRate: meta.usdRate });
       } catch (err) {
         setOrderErr((err as Error).message);
         throw err;
@@ -141,6 +141,9 @@ export default function Home() {
         targetMaxPct: meta.targetMaxPct,
       });
       const sanity = computeSanity(pe, order, scenarios);
+      // Prepend any parser warnings (USD conversion, format detection) to the
+      // sanity list so the user sees them surfaced together.
+      const allWarnings = [...order.warnings, ...sanity];
       const baseImpact = computeBaseCatalogImpact(pe);
       const finImpact = computeFinishingCatalogImpact(pe);
       const a = scenarios.scenarios.find((s) => s.id === "A_Current_Locked")!;
@@ -153,7 +156,7 @@ export default function Home() {
         scenarios,
         selfCheck,
         recommendation,
-        sanity,
+        sanity: allWarnings,
         baseImpact,
         finImpact,
         nbdLift,

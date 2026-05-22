@@ -7,6 +7,7 @@ import {
   normalizeStock,
   normalizeTurnaround,
 } from "./normalize";
+import { bandLabelOf } from "./qtyBands";
 
 export interface OrderReplayRow {
   description: string;
@@ -20,6 +21,8 @@ export interface OrderReplayRow {
   orders: number;
   actualPaid: number;
   avgPaid: number;
+  /** Pre-computed Scenario A price per order (only available in legacy format).
+   * For per-order detail input this stays 0 and self-check is skipped. */
   newPricePerOrder: number;
   newRevenue: number;
   delta: number;
@@ -27,13 +30,15 @@ export interface OrderReplayRow {
   baseCost: number;
   baseSP: number;
   variantSP: number;
-  /** Lookup key matching the price engine. Coating is unknown from this sheet
-   * so it's empty here and the price-engine match will need a coating-agnostic
-   * fallback. */
+  /** Lookup key matching the price engine. Coating is stripped to "" so the
+   * price-engine match uses the coating-agnostic index. */
   keyNoCoating: string;
 }
 
+export type OrderReplayFormat = "per_sku_aggregated" | "per_order_detail";
+
 export interface OrderReplayData {
+  format: OrderReplayFormat;
   rows: OrderReplayRow[];
   totals: {
     orders: number;
@@ -43,6 +48,9 @@ export interface OrderReplayData {
   };
   unmatched: { count: number; revenue: number; reasons: string[] };
   warnings: string[];
+  /** True when the source already contains pre-computed New Price/Order data
+   * (legacy aggregated format). Self-check only runs when this is true. */
+  hasPrecomputedScenarioA: boolean;
 }
 
 function toNumber(v: unknown): number {
@@ -57,89 +65,138 @@ function toStr(v: unknown): string {
   return String(v).trim();
 }
 
-const EXPECTED_COLS = [
-  "Description",
-  "Qty",
-  "Qty Band",
-  "Turnaround",
-  "Stock",
-  "Size",
-  "Bundling",
-  "Scoring",
-  "Orders",
-  "Actual Paid $",
-  "Avg Paid $",
-  "New Price/Order",
-  "New Revenue $",
-  "Delta $",
-  "% Change",
-  "Base Cost",
-  "Base SP",
-  "Variant SP",
-];
-
-export async function parseOrderReplay(file: File): Promise<OrderReplayData> {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  // Prefer the "Per-SKU Detail" sheet (multi-sheet xlsx). If absent and there
-  // is only one sheet (typical for CSV uploads), use it as the source.
-  let sheetName: string | undefined;
-  if (wb.SheetNames.includes("Per-SKU Detail")) {
-    sheetName = "Per-SKU Detail";
-  } else if (wb.SheetNames.length === 1) {
-    sheetName = wb.SheetNames[0];
-  }
-  if (!sheetName) {
-    throw new Error(
-      `Order replay missing "Per-SKU Detail" sheet. Sheets found: ${wb.SheetNames.join(", ")}. ` +
-        `For a CSV upload, export only the Per-SKU Detail tab so it's the single sheet in the file.`
-    );
-  }
-  const ws = wb.Sheets[sheetName];
-  const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
-    header: 1,
-    raw: true,
-    defval: null,
-  });
-  if (aoa.length < 2) throw new Error('"Per-SKU Detail" sheet has no data rows.');
-  const header = aoa[0];
-  const idx: Record<string, number> = {};
-  for (const name of EXPECTED_COLS) {
+function findColIndex(
+  header: (string | number | null)[],
+  candidates: string[]
+): number {
+  for (const cand of candidates) {
     const i = header.findIndex(
-      (h) => typeof h === "string" && h.trim().toLowerCase() === name.toLowerCase()
+      (h) =>
+        typeof h === "string" && h.trim().toLowerCase() === cand.toLowerCase()
     );
-    if (i < 0) throw new Error(`Order replay "Per-SKU Detail" missing column "${name}".`);
-    idx[name] = i;
+    if (i >= 0) return i;
   }
+  return -1;
+}
 
+/** Column-name flexibility table. Each entry is one logical field and the
+ * list of header strings (case-insensitive) we accept. */
+const COL_CANDIDATES = {
+  // Legacy "Per-SKU Detail" fields
+  description: ["Description"],
+  qty: ["Qty", "Print Qty", "Actual Print Qty", "PE3 Qty Used"],
+  qtyBand: ["Qty Band"],
+  turnaround: ["Turnaround", "PE3 Turnaround", "Turnaround (Raw)"],
+  stock: ["Stock", "PE3 Stock"],
+  size: ["Size", "PE3 Size", "Size (Ordered)"],
+  bundling: ["Bundling", "PE3 Bundling", "Packaging"],
+  scoring: ["Scoring", "PE3 Scoring"],
+  orders: ["Orders", "# Orders"],
+  actualPaid: ["Actual Paid $", "Total Paid", "Total Revenue"],
+  avgPaid: ["Avg Paid $", "Avg Paid", "Actual Sale Price"],
+  currency: ["Currency"],
+  newPricePerOrder: ["New Price/Order", "New Price"],
+  newRevenue: ["New Revenue $", "New Revenue"],
+  delta: ["Delta $", "Delta", "Price Diff (Act−PE3)", "Price Diff\n(Act−PE3)"],
+  pctChange: ["% Change", "Pct Change"],
+  baseCost: ["Base Cost"],
+  baseSP: ["Base SP"],
+  variantSP: ["Variant SP", "PE3 Sale Price"],
+};
+
+interface ColMap {
+  description: number;
+  qty: number;
+  qtyBand: number;
+  turnaround: number;
+  stock: number;
+  size: number;
+  bundling: number;
+  scoring: number;
+  orders: number;
+  actualPaid: number;
+  avgPaid: number;
+  currency: number;
+  newPricePerOrder: number;
+  newRevenue: number;
+  delta: number;
+  pctChange: number;
+  baseCost: number;
+  baseSP: number;
+  variantSP: number;
+}
+
+function buildColMap(header: (string | number | null)[]): ColMap {
+  const m = {} as ColMap;
+  for (const [key, cands] of Object.entries(COL_CANDIDATES) as [
+    keyof typeof COL_CANDIDATES,
+    string[],
+  ][]) {
+    m[key as keyof ColMap] = findColIndex(header, cands);
+  }
+  return m;
+}
+
+/** Pick the right sheet for parsing. Returns the chosen sheet and the format. */
+function chooseSheet(
+  wb: XLSX.WorkBook
+): { sheetName: string; format: OrderReplayFormat } | null {
+  const names = wb.SheetNames;
+  if (names.includes("Per-SKU Detail")) {
+    return { sheetName: "Per-SKU Detail", format: "per_sku_aggregated" };
+  }
+  if (names.includes("Matched Orders (Price Analysis)")) {
+    return { sheetName: "Matched Orders (Price Analysis)", format: "per_order_detail" };
+  }
+  // Fallback: try to detect format from the first sheet's header
+  if (names.length >= 1) {
+    const first = wb.Sheets[names[0]];
+    const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(first, {
+      header: 1,
+      defval: null,
+    });
+    if (aoa.length > 0) {
+      const header = aoa[0];
+      const m = buildColMap(header);
+      // Aggregated format needs Orders + Avg Paid + New Price/Order
+      if (m.orders >= 0 && m.avgPaid >= 0 && m.newPricePerOrder >= 0) {
+        return { sheetName: names[0], format: "per_sku_aggregated" };
+      }
+      // Per-order detail needs Actual Sale Price + Qty + Stock/Size
+      if (m.avgPaid >= 0 && m.qty >= 0 && m.stock >= 0 && m.size >= 0) {
+        return { sheetName: names[0], format: "per_order_detail" };
+      }
+    }
+  }
+  return null;
+}
+
+function rowsForPerSku(
+  aoa: (string | number | null)[][],
+  m: ColMap
+): {
+  rows: OrderReplayRow[];
+  totals: { orders: number; actualPaid: number; newRevenue: number };
+} {
   const rows: OrderReplayRow[] = [];
   let totalOrders = 0;
   let totalPaid = 0;
   let totalNewRev = 0;
-
   for (let r = 1; r < aoa.length; r++) {
     const row = aoa[r];
     if (!row || row.length === 0) continue;
-    const qty = toNumber(row[idx["Qty"]]);
+    const qty = toNumber(row[m.qty]);
     if (!qty) continue;
-    const description = toStr(row[idx["Description"]]);
-    const qtyBandLabel = toStr(row[idx["Qty Band"]]);
-    const turnaround = normalizeTurnaround(toStr(row[idx["Turnaround"]]));
-    const stock = normalizeStock(toStr(row[idx["Stock"]]));
-    const size = normalizeSize(toStr(row[idx["Size"]]));
-    const bundling = normalizeBundling(toStr(row[idx["Bundling"]]));
-    const scoring = normalizeScoring(toStr(row[idx["Scoring"]]));
-    const orders = toNumber(row[idx["Orders"]]);
-    const actualPaid = toNumber(row[idx["Actual Paid $"]]);
-    const avgPaid = toNumber(row[idx["Avg Paid $"]]);
-    const newPricePerOrder = toNumber(row[idx["New Price/Order"]]);
-    const newRevenue = toNumber(row[idx["New Revenue $"]]);
-    const delta = toNumber(row[idx["Delta $"]]);
-    const pctChange = toNumber(row[idx["% Change"]]);
-    const baseCost = toNumber(row[idx["Base Cost"]]);
-    const baseSP = toNumber(row[idx["Base SP"]]);
-    const variantSP = toNumber(row[idx["Variant SP"]]);
-
+    const turnaround = normalizeTurnaround(toStr(row[m.turnaround]));
+    const stock = normalizeStock(toStr(row[m.stock]));
+    const size = normalizeSize(toStr(row[m.size]));
+    const bundling = normalizeBundling(toStr(row[m.bundling]));
+    const scoring = normalizeScoring(toStr(row[m.scoring]));
+    const orders = toNumber(row[m.orders]);
+    const actualPaid = toNumber(row[m.actualPaid]);
+    const avgPaid = toNumber(row[m.avgPaid]);
+    const newPricePerOrder = toNumber(row[m.newPricePerOrder]);
+    const newRevenue = toNumber(row[m.newRevenue]);
     const keyNoCoating = lookupKey({
       stock,
       coating: "",
@@ -149,11 +206,10 @@ export async function parseOrderReplay(file: File): Promise<OrderReplayData> {
       bundling,
       scoring,
     });
-
     rows.push({
-      description,
+      description: toStr(row[m.description]),
       qty,
-      qtyBandLabel,
+      qtyBandLabel: toStr(row[m.qtyBand]) || bandLabelOf(qty),
       turnaround,
       stock,
       size,
@@ -164,81 +220,284 @@ export async function parseOrderReplay(file: File): Promise<OrderReplayData> {
       avgPaid,
       newPricePerOrder,
       newRevenue,
-      delta,
-      pctChange,
-      baseCost,
-      baseSP,
-      variantSP,
+      delta: toNumber(row[m.delta]),
+      pctChange: toNumber(row[m.pctChange]),
+      baseCost: toNumber(row[m.baseCost]),
+      baseSP: toNumber(row[m.baseSP]),
+      variantSP: toNumber(row[m.variantSP]),
       keyNoCoating,
     });
-
     totalOrders += orders;
     totalPaid += actualPaid;
     totalNewRev += newRevenue;
   }
+  return { rows, totals: { orders: totalOrders, actualPaid: totalPaid, newRevenue: totalNewRev } };
+}
 
-  let unmatchedCount = 0;
-  let unmatchedRev = 0;
-  const unmatchedReasonsSet = new Set<string>();
-  if (wb.SheetNames.includes("Unmatched")) {
-    const wsU = wb.Sheets["Unmatched"];
-    const aoaU = XLSX.utils.sheet_to_json<(string | number | null)[]>(wsU, {
+function rowsForPerOrder(
+  aoa: (string | number | null)[][],
+  m: ColMap,
+  cadFromUsd: number
+): {
+  rows: OrderReplayRow[];
+  totals: { orders: number; actualPaid: number; newRevenue: number };
+  usdRowsConverted: number;
+} {
+  const rows: OrderReplayRow[] = [];
+  let totalOrders = 0;
+  let totalPaid = 0;
+  let usdConverted = 0;
+  for (let r = 1; r < aoa.length; r++) {
+    const row = aoa[r];
+    if (!row || row.length === 0) continue;
+    const qty = toNumber(row[m.qty]);
+    if (!qty) continue;
+    const stock = normalizeStock(toStr(row[m.stock]));
+    const size = normalizeSize(toStr(row[m.size]));
+    if (!stock || !size) continue;
+    const turnaround = normalizeTurnaround(toStr(row[m.turnaround]));
+    const bundling = normalizeBundling(toStr(row[m.bundling]));
+    const scoring = normalizeScoring(toStr(row[m.scoring]));
+    let salePrice = toNumber(row[m.avgPaid]);
+    if (!salePrice) continue;
+    const currency = m.currency >= 0 ? toStr(row[m.currency]).toUpperCase() : "CAD";
+    if (currency === "USD") {
+      salePrice = salePrice * cadFromUsd;
+      usdConverted += 1;
+    }
+    const keyNoCoating = lookupKey({
+      stock,
+      coating: "",
+      size,
+      qty,
+      turnaround,
+      bundling,
+      scoring,
+    });
+    rows.push({
+      description: toStr(row[m.description]) || `${stock} / ${size} / ${qty}`,
+      qty,
+      qtyBandLabel: bandLabelOf(qty),
+      turnaround,
+      stock,
+      size,
+      bundling,
+      scoring,
+      orders: 1,
+      actualPaid: salePrice,
+      avgPaid: salePrice,
+      newPricePerOrder: 0,
+      newRevenue: 0,
+      delta: 0,
+      pctChange: 0,
+      baseCost: 0,
+      baseSP: 0,
+      variantSP: m.variantSP >= 0 ? toNumber(row[m.variantSP]) : 0,
+      keyNoCoating,
+    });
+    totalOrders += 1;
+    totalPaid += salePrice;
+  }
+  return {
+    rows,
+    totals: { orders: totalOrders, actualPaid: totalPaid, newRevenue: 0 },
+    usdRowsConverted: usdConverted,
+  };
+}
+
+function countUnmatchedFromLegacySheet(wb: XLSX.WorkBook): {
+  count: number;
+  revenue: number;
+  reasons: Set<string>;
+} {
+  const reasons = new Set<string>();
+  let count = 0;
+  let revenue = 0;
+  if (!wb.SheetNames.includes("Unmatched")) {
+    return { count, revenue, reasons };
+  }
+  const ws = wb.Sheets["Unmatched"];
+  const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
+    header: 1,
+    defval: null,
+  });
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(aoa.length, 5); i++) {
+    const r = aoa[i];
+    if (
+      r &&
+      r.some((c) => typeof c === "string" && c.toLowerCase().includes("orders")) &&
+      r.some((c) => typeof c === "string" && c.toLowerCase().includes("revenue"))
+    ) {
+      headerRow = i;
+      break;
+    }
+  }
+  if (headerRow < 0) return { count, revenue, reasons };
+  const h = aoa[headerRow];
+  const orderIdx = h.findIndex(
+    (c) => typeof c === "string" && c.toLowerCase().includes("orders")
+  );
+  const revIdx = h.findIndex(
+    (c) => typeof c === "string" && c.toLowerCase().includes("revenue")
+  );
+  const reasonIdx = h.findIndex(
+    (c) => typeof c === "string" && c.toLowerCase().includes("reason")
+  );
+  for (let i = headerRow + 1; i < aoa.length; i++) {
+    const r = aoa[i];
+    if (!r) continue;
+    const o = toNumber(r[orderIdx]);
+    const v = toNumber(r[revIdx]);
+    if (!o && !v) continue;
+    count += o;
+    revenue += v;
+    if (reasonIdx >= 0) {
+      const reason = toStr(r[reasonIdx]);
+      if (reason) reasons.add(reason);
+    }
+  }
+  return { count, revenue, reasons };
+}
+
+function countUnmatchedFromExtraSheets(
+  wb: XLSX.WorkBook,
+  cadFromUsd: number
+): { count: number; revenue: number; reasons: Set<string> } {
+  // For per-order detail workbooks, "Custom Sizes (No PE3 Match)" and
+  // "Rush Orders (No PE3 Match)" hold the unmatched rows — each row is one
+  // order with an "Actual Sale Price" and a Currency.
+  const reasons = new Set<string>();
+  let count = 0;
+  let revenue = 0;
+  const candidates = [
+    "Custom Sizes (No PE3 Match)",
+    "Rush Orders (No PE3 Match)",
+    "Other Unmatched",
+  ];
+  for (const name of candidates) {
+    if (!wb.SheetNames.includes(name)) continue;
+    const ws = wb.Sheets[name];
+    const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
       header: 1,
       defval: null,
     });
-    // header at row 2 typically; iterate looking for plausible rows
-    let headerRowU = -1;
-    for (let i = 0; i < Math.min(aoaU.length, 5); i++) {
-      const r = aoaU[i];
-      if (
-        r &&
-        r.some((c) => typeof c === "string" && c.toLowerCase().includes("orders")) &&
-        r.some((c) => typeof c === "string" && c.toLowerCase().includes("revenue"))
-      ) {
-        headerRowU = i;
-        break;
+    if (aoa.length < 2) continue;
+    const header = aoa[0];
+    const m = buildColMap(header);
+    if (m.avgPaid < 0) continue;
+    for (let r = 1; r < aoa.length; r++) {
+      const row = aoa[r];
+      if (!row || row.length === 0) continue;
+      let v = toNumber(row[m.avgPaid]);
+      if (!v) continue;
+      const currency =
+        m.currency >= 0 ? toStr(row[m.currency]).toUpperCase() : "CAD";
+      if (currency === "USD") v = v * cadFromUsd;
+      revenue += v;
+      count += 1;
+    }
+    reasons.add(name);
+  }
+  return { count, revenue, reasons };
+}
+
+export async function parseOrderReplay(
+  file: File,
+  opts: { usdRate?: number } = {}
+): Promise<OrderReplayData> {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const choice = chooseSheet(wb);
+  if (!choice) {
+    throw new Error(
+      `Order replay couldn't find a usable sheet. Looked for "Per-SKU Detail" or "Matched Orders (Price Analysis)". ` +
+        `Sheets found: ${wb.SheetNames.join(", ") || "(none)"}.`
+    );
+  }
+  const { sheetName, format } = choice;
+  const ws = wb.Sheets[sheetName];
+  const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
+    header: 1,
+    raw: true,
+    defval: null,
+  });
+  if (aoa.length < 2) {
+    throw new Error(`Sheet "${sheetName}" has no data rows.`);
+  }
+  const m = buildColMap(aoa[0]);
+
+  // Required-column guard per format
+  if (format === "per_sku_aggregated") {
+    const required: [keyof ColMap, string][] = [
+      ["qty", "Qty"],
+      ["turnaround", "Turnaround"],
+      ["stock", "Stock"],
+      ["size", "Size"],
+      ["orders", "Orders"],
+      ["avgPaid", "Avg Paid $"],
+    ];
+    for (const [k, label] of required) {
+      if (m[k] < 0) {
+        throw new Error(`Aggregated order replay missing required column "${label}".`);
       }
     }
-    if (headerRowU >= 0) {
-      const h = aoaU[headerRowU];
-      const orderIdx = h.findIndex(
-        (c) => typeof c === "string" && c.toLowerCase().includes("orders")
-      );
-      const revIdx = h.findIndex(
-        (c) => typeof c === "string" && c.toLowerCase().includes("revenue")
-      );
-      const reasonIdx = h.findIndex(
-        (c) => typeof c === "string" && c.toLowerCase().includes("reason")
-      );
-      for (let i = headerRowU + 1; i < aoaU.length; i++) {
-        const r = aoaU[i];
-        if (!r) continue;
-        const o = toNumber(r[orderIdx]);
-        const v = toNumber(r[revIdx]);
-        if (!o && !v) continue;
-        unmatchedCount += o;
-        unmatchedRev += v;
-        if (reasonIdx >= 0) {
-          const reason = toStr(r[reasonIdx]);
-          if (reason) unmatchedReasonsSet.add(reason);
-        }
+  } else {
+    const required: [keyof ColMap, string][] = [
+      ["qty", "Qty / Print Qty"],
+      ["stock", "Stock / PE3 Stock"],
+      ["size", "Size / PE3 Size"],
+      ["avgPaid", "Actual Sale Price / Avg Paid"],
+    ];
+    for (const [k, label] of required) {
+      if (m[k] < 0) {
+        throw new Error(
+          `Per-order replay missing required column "${label}". Sheet: ${sheetName}.`
+        );
       }
     }
   }
 
+  const usdRate = opts.usdRate && opts.usdRate > 0 ? opts.usdRate : 0.7;
+  const cadFromUsd = 1 / usdRate; // e.g. 0.70 → 1.428 CAD per USD
+
+  const warnings: string[] = [];
+  let result: { rows: OrderReplayRow[]; totals: { orders: number; actualPaid: number; newRevenue: number } };
+  let usdConverted = 0;
+
+  if (format === "per_sku_aggregated") {
+    result = rowsForPerSku(aoa, m);
+  } else {
+    const r2 = rowsForPerOrder(aoa, m, cadFromUsd);
+    result = { rows: r2.rows, totals: r2.totals };
+    usdConverted = r2.usdRowsConverted;
+    if (usdConverted > 0) {
+      warnings.push(
+        `${usdConverted} USD orders converted to CAD using ×${cadFromUsd.toFixed(4)} (inverse of ${usdRate.toFixed(2)} USD rate).`
+      );
+    }
+  }
+
+  const unmatched =
+    format === "per_sku_aggregated"
+      ? countUnmatchedFromLegacySheet(wb)
+      : countUnmatchedFromExtraSheets(wb, cadFromUsd);
+
   return {
-    rows,
+    format,
+    rows: result.rows,
     totals: {
-      orders: totalOrders,
-      actualPaid: totalPaid,
-      newRevenue: totalNewRev,
-      deltaAtScenarioA: totalNewRev - totalPaid,
+      orders: result.totals.orders,
+      actualPaid: result.totals.actualPaid,
+      newRevenue: result.totals.newRevenue,
+      deltaAtScenarioA: result.totals.newRevenue - result.totals.actualPaid,
     },
     unmatched: {
-      count: unmatchedCount,
-      revenue: unmatchedRev,
-      reasons: Array.from(unmatchedReasonsSet),
+      count: unmatched.count,
+      revenue: unmatched.revenue,
+      reasons: Array.from(unmatched.reasons),
     },
-    warnings: [],
+    warnings,
+    hasPrecomputedScenarioA: format === "per_sku_aggregated",
   };
 }
