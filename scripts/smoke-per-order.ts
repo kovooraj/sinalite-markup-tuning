@@ -32,7 +32,7 @@ async function main() {
   const pricBuf = await readFile(PRICE);
   const ordBuf = await readFile(ORDER);
   const pe = await parsePriceEngine(new FakeFile(pricBuf, "p.csv") as unknown as File);
-  console.log(`Price engine: ${pe.productName} · ${pe.rows.length} rows · coatings ${pe.coatings.join(",")}`);
+  console.log(`Price engine: ${pe.productName} · ${pe.rows.length} rows · dims ${pe.dimensions.join(",")}`);
 
   const order = await parseOrderReplay(
     new FakeFile(ordBuf, "o.xlsx") as unknown as File,

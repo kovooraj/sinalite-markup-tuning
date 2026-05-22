@@ -51,7 +51,7 @@ const orderFile = new FakeFile(orderBuf, "order.xlsx") as unknown as File;
 console.log(`Reading price engine: ${PRICE_FILE}`);
 const pe = await parsePriceEngine(priceFile);
 console.log(`  product: ${pe.productName}`);
-console.log(`  rows: ${pe.rows.length}, coatings: ${pe.coatings.join(", ") || "—"}`);
+console.log(`  rows: ${pe.rows.length}, dimensions: ${pe.dimensions.join(", ") || "—"}`);
 if (pe.warnings.length) for (const w of pe.warnings) console.log(`  WARN: ${w}`);
 
 console.log(`Reading order replay: ${ORDER_FILE}`);

@@ -66,8 +66,32 @@ function computeSanity(
       `${(belowPct * 100).toFixed(1)}% of catalog rows priced below cost — exceeds pilot baseline (~5.5%).`
     );
   }
+  // "Pure base" = no add-on dimensions set on the order row
+  const ADDON_DIMS = [
+    "bundling",
+    "scoring",
+    "finishing",
+    "lamination",
+    "foil",
+    "embossing",
+    "diecutting",
+    "corner",
+    "perforation",
+    "drilling",
+  ];
+  const isPureBaseOrder = (r: (typeof order.rows)[number]): boolean => {
+    for (const d of ADDON_DIMS) {
+      const v = r.dims[d];
+      if (!v) continue;
+      const lc = v.toLowerCase();
+      if (lc.includes("no bundling") || lc === "none" || lc === "free" || lc === "no")
+        continue;
+      return false;
+    }
+    return true;
+  };
   const pureBaseOrders = order.rows
-    .filter((r) => r.bundling === "No bundling - FREE" && r.scoring === "None")
+    .filter(isPureBaseOrder)
     .reduce((sum, r) => sum + r.orders, 0);
   const totalOrders = order.totals.orders;
   const pureBaseShare = totalOrders > 0 ? pureBaseOrders / totalOrders : 0;

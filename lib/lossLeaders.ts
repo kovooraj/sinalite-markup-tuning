@@ -1,6 +1,6 @@
-import { OrderReplayData } from "./parseOrderReplay";
-import { PriceEngineData } from "./parsePriceEngine";
-import { lookupKey } from "./normalize";
+import { OrderReplayData, OrderReplayRow, orderRowKey } from "./parseOrderReplay";
+import { PriceEngineData, indexPriceEngine, isBaseRow } from "./parsePriceEngine";
+import { commonDimensions } from "./computeScenarios";
 
 export type Verdict = "JUSTIFIED" | "MARGINAL" | "BORDERLINE" | "NOT JUSTIFIED";
 
@@ -23,7 +23,6 @@ export interface LossLeadersOutput {
     addonMarginUsd: number;
     netUsd: number;
   };
-  // The largest concentration of NOT JUSTIFIED losses, for the callout line
   callout: {
     sizeFamily: string;
     qtys: number[];
@@ -38,20 +37,45 @@ function verdictOf(net: number): { verdict: Verdict; action: string } {
   return { verdict: "NOT JUSTIFIED", action: "Raise / kill" };
 }
 
-function fmtQty(q: number): string {
-  if (q >= 1000) return `${(q / 1000).toFixed(q % 1000 ? 1 : 0).replace(/\.0$/, "")},000`.replace("k,000", "k").replace("000,000", "0,000");
-  return q.toString();
-}
-
 function fmtQtySimple(q: number): string {
   return q.toLocaleString("en-US");
+}
+
+/** Decide whether an order row is "base" (no add-on dimensions set) using the
+ * order's own dims and the price engine's add-on dimension list. */
+function isOrderBaseRow(r: OrderReplayRow): boolean {
+  // Use the same is-base logic across products: any add-on-style dimension
+  // (bundling, scoring, finishing, etc.) is empty OR carries a "no/none" sentinel.
+  const addonDims = [
+    "bundling",
+    "scoring",
+    "finishing",
+    "lamination",
+    "foil",
+    "embossing",
+    "diecutting",
+    "corner",
+    "perforation",
+    "drilling",
+  ];
+  for (const d of addonDims) {
+    const v = r.dims[d];
+    if (!v) continue;
+    const lc = v.toLowerCase();
+    if (lc.includes("no bundling") || lc === "none" || lc === "free" || lc === "no")
+      continue;
+    return false;
+  }
+  return true;
 }
 
 export function computeLossLeaders(
   order: OrderReplayData,
   pe: PriceEngineData
 ): LossLeadersOutput {
-  // Aggregate by (size, qty) — separately for base vs variant.
+  const common = commonDimensions(pe, order);
+  const peIndex = indexPriceEngine(pe, common);
+
   type Agg = {
     size: string;
     qty: number;
@@ -72,16 +96,10 @@ export function computeLossLeaders(
   }
 
   for (const r of order.rows) {
-    // We only consider Standard turnaround orders for loss-leader analysis;
-    // rush orders carry different economics and are evaluated separately in
-    // the NBD lift narrative.
     if (r.turnaround !== "Standard") continue;
-    const isBase = r.bundling === "No bundling - FREE" && r.scoring === "None";
+    const isBase = isOrderBaseRow(r);
     const agg = get(r.size, r.qty);
-    // Margin per order = (avgPaid - variantCost) where variantCost comes from
-    // the price engine. The replay's "Base Cost" column is base-only; for the
-    // variant we look up baseCost + finCost.
-    const peRow = pe.byKeyNoCoating.get(r.keyNoCoating);
+    const peRow = peIndex.get(orderRowKey(r, common));
     const variantCost = peRow ? peRow.baseCost + peRow.finCost : r.baseCost;
     const marginPerOrder = r.avgPaid - variantCost;
     if (isBase) {
@@ -93,12 +111,9 @@ export function computeLossLeaders(
     }
   }
 
-  // Sort all aggregates by base order volume descending; take top 20 that have
-  // at least 1 base order (to be visible to reps).
   const all = Array.from(map.values()).filter((a) => a.baseOrders > 0);
   all.sort((a, b) => b.baseOrders - a.baseOrders);
   const top = all.slice(0, 20);
-  // Now sort the chosen 20 by net margin descending (matches reference doc).
   top.sort((a, b) => b.baseMargin + b.addonMargin - (a.baseMargin + a.addonMargin));
 
   const rows: LossLeaderRow[] = top.map((a) => {
@@ -127,8 +142,6 @@ export function computeLossLeaders(
     { baseMarginUsd: 0, addonMarginUsd: 0, netUsd: 0 }
   );
 
-  // Callout: find the size family carrying the biggest concentration of
-  // NOT JUSTIFIED losses across multiple qty breaks.
   const lossesBySize = new Map<string, { totalLoss: number; qtys: Set<number> }>();
   for (const r of rows) {
     if (r.verdict !== "NOT JUSTIFIED") continue;
@@ -160,3 +173,7 @@ export function computeLossLeaders(
 
   return { rows, totals, callout };
 }
+
+// re-export to avoid unused-import warnings on isBaseRow if future consumers
+// reach for it from here
+export { isBaseRow };

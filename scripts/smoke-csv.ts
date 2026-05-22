@@ -31,16 +31,18 @@ async function main() {
   const pe = await parsePriceEngine(f);
   console.log(`Product: ${pe.productName}`);
   console.log(`Rows parsed: ${pe.rows.length}`);
-  console.log(`Coatings: ${pe.coatings.join(", ") || "—"}`);
+  console.log(`Dimensions detected: ${pe.dimensions.join(", ") || "(none)"}`);
   console.log(`Warnings: ${pe.warnings.length}`);
   for (const w of pe.warnings) console.log(`  - ${w}`);
 
-  // Spot-check first 3 rows
   console.log(`\nFirst 3 rows:`);
   for (const r of pe.rows.slice(0, 3)) {
+    const dimStr = Object.entries(r.dims)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(" ");
     console.log(
       `  qty=${r.qty} stock="${r.stock.slice(0, 40)}" size=${r.size} ` +
-        `bundling="${r.bundling.slice(0, 30)}" base=$${r.baseCost.toFixed(2)} fin=$${r.finCost.toFixed(2)} sale=$${r.currentSalePrice.toFixed(2)}`
+        `${dimStr} base=$${r.baseCost.toFixed(2)} fin=$${r.finCost.toFixed(2)} sale=$${r.currentSalePrice.toFixed(2)}`
     );
   }
 }

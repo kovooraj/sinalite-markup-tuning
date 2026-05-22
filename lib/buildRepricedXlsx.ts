@@ -6,8 +6,8 @@ import { bandOf } from "./qtyBands";
 
 export interface BuildRepricedOpts {
   pe: PriceEngineData;
-  scenarioId: string; // e.g. "A_Current_Locked"
-  usdRate: number; // CAD * usdRate = USD (e.g. 0.70)
+  scenarioId: string;
+  usdRate: number;
 }
 
 const FMT_CURRENCY = '"$"#,##0.00;("$"#,##0.00);"-"';
@@ -32,6 +32,25 @@ const HEADER_FONT: Partial<ExcelJS.Font> = {
 };
 const BODY_FONT: Partial<ExcelJS.Font> = { name: "Arial", size: 10 };
 
+// Map dimension key → display column header for output
+const DIM_DISPLAY: Record<string, string> = {
+  coating: "Coating",
+  bundling: "Bundling",
+  scoring: "Scoring",
+  cover: "Cover",
+  binding: "Binding",
+  pages: "Pages",
+  sides: "Sides",
+  finishing: "Finishing",
+  lamination: "Lamination",
+  foil: "Foil",
+  embossing: "Embossing",
+  diecutting: "Die Cutting",
+  corner: "Corner",
+  perforation: "Perforation",
+  drilling: "Drilling",
+};
+
 export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> {
   const scenario: ScenarioDef | undefined = SCENARIO_BY_ID[opts.scenarioId];
   if (!scenario) throw new Error(`Unknown scenario: ${opts.scenarioId}`);
@@ -45,30 +64,39 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
 
   const usdHeader = `New Price USD (@${opts.usdRate.toFixed(2)})`;
 
-  ws.columns = [
+  // Dynamic columns: standard fields + product-specific dimensions + computed
+  type Col = { header: string; key: string; width: number; fmt?: string };
+  const cols: Col[] = [
     { header: "Product", key: "product", width: 36 },
-    { header: "qty", key: "qty", width: 9 },
+    { header: "qty", key: "qty", width: 9, fmt: FMT_INT },
     { header: "Turnaround", key: "turnaround", width: 22 },
     { header: "size", key: "size", width: 10 },
     { header: "Stock", key: "stock", width: 32 },
-    { header: "Coating", key: "coating", width: 14 },
-    { header: "Bundling", key: "bundling", width: 22 },
-    { header: "Scoring", key: "scoring", width: 14 },
-    { header: "sale price", key: "salePrice", width: 12 },
-    { header: "PE3 cost no markup", key: "pe3Cost", width: 16 },
-    { header: "Consolidated Markup", key: "consolidatedMarkup", width: 16 },
-    { header: "Base Cost (CAD)", key: "baseCost", width: 14 },
-    { header: "Finishing Cost (CAD)", key: "finCost", width: 16 },
-    { header: "Base Markup %", key: "baseMarkup", width: 12 },
-    { header: "Finishing Markup %", key: "finMarkup", width: 14 },
-    { header: "Marked-up Base (CAD)", key: "markedBase", width: 16 },
-    { header: "Marked-up Finishing (CAD)", key: "markedFin", width: 18 },
-    { header: "New Price CAD", key: "newCad", width: 14 },
-    { header: usdHeader, key: "newUsd", width: 18 },
-    { header: "Delta vs sale price (CAD)", key: "delta", width: 18 },
   ];
+  for (const dim of opts.pe.dimensions) {
+    cols.push({
+      header: DIM_DISPLAY[dim] ?? dim,
+      key: `dim_${dim}`,
+      width: 18,
+    });
+  }
+  cols.push(
+    { header: "sale price", key: "salePrice", width: 12, fmt: FMT_CURRENCY },
+    { header: "PE3 cost no markup", key: "pe3Cost", width: 16, fmt: FMT_CURRENCY },
+    { header: "Consolidated Markup", key: "consolidatedMarkup", width: 16, fmt: FMT_PCT },
+    { header: "Base Cost (CAD)", key: "baseCost", width: 14, fmt: FMT_CURRENCY },
+    { header: "Finishing Cost (CAD)", key: "finCost", width: 16, fmt: FMT_CURRENCY },
+    { header: "Base Markup %", key: "baseMarkup", width: 12, fmt: FMT_PCT },
+    { header: "Finishing Markup %", key: "finMarkup", width: 14, fmt: FMT_PCT },
+    { header: "Marked-up Base (CAD)", key: "markedBase", width: 16, fmt: FMT_CURRENCY },
+    { header: "Marked-up Finishing (CAD)", key: "markedFin", width: 18, fmt: FMT_CURRENCY },
+    { header: "New Price CAD", key: "newCad", width: 14, fmt: FMT_CURRENCY },
+    { header: usdHeader, key: "newUsd", width: 18, fmt: FMT_CURRENCY },
+    { header: "Delta vs sale price (CAD)", key: "delta", width: 18, fmt: FMT_CURRENCY }
+  );
 
-  // Apply header styling
+  ws.columns = cols.map(({ header, key, width }) => ({ header, key, width }));
+
   const headerRow = ws.getRow(1);
   headerRow.eachCell((cell) => {
     cell.fill = HEADER_FILL;
@@ -77,7 +105,6 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
   });
   headerRow.height = 30;
 
-  // Body rows
   for (const r of opts.pe.rows) {
     const band = bandOf(r.qty);
     const baseMkup = scenario.grad.base[band];
@@ -88,22 +115,19 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
         baseCost: r.baseCost,
         finCost: r.finCost,
         isRush: r.turnaround === "Rush (NBD)",
-        currentSalePrice: 0, // 0 disables cap rule — repricer shows uncapped model price
+        currentSalePrice: 0,
       },
       scenario.grad
     );
     const newCad = res.uncappedPrice;
     const newUsd = newCad * opts.usdRate;
     const delta = newCad - r.currentSalePrice;
-    ws.addRow({
+    const rowData: Record<string, string | number> = {
       product: r.productName,
       qty: r.qty,
       turnaround: r.rawTurnaround,
       size: r.size,
       stock: r.stock,
-      coating: r.coating,
-      bundling: r.bundling,
-      scoring: r.scoring,
       salePrice: r.currentSalePrice,
       pe3Cost: r.pe3CostTotal,
       consolidatedMarkup: r.consolidatedMarkup,
@@ -116,36 +140,24 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
       newCad: round(newCad, 2),
       newUsd: round(newUsd, 2),
       delta: round(delta, 2),
-    });
+    };
+    for (const dim of opts.pe.dimensions) {
+      rowData[`dim_${dim}`] = r.dims[dim] ?? "";
+    }
+    ws.addRow(rowData);
   }
 
-  // Body styling — formats, fonts, highlights
   const lastRow = ws.rowCount;
-  const fmtMap: Record<string, string> = {
-    qty: FMT_INT,
-    salePrice: FMT_CURRENCY,
-    pe3Cost: FMT_CURRENCY,
-    consolidatedMarkup: FMT_PCT,
-    baseCost: FMT_CURRENCY,
-    finCost: FMT_CURRENCY,
-    baseMarkup: FMT_PCT,
-    finMarkup: FMT_PCT,
-    markedBase: FMT_CURRENCY,
-    markedFin: FMT_CURRENCY,
-    newCad: FMT_CURRENCY,
-    newUsd: FMT_CURRENCY,
-    delta: FMT_CURRENCY,
-  };
   for (let r = 2; r <= lastRow; r++) {
     const row = ws.getRow(r);
     row.eachCell((cell) => {
       cell.font = BODY_FONT;
     });
-    for (const [key, fmt] of Object.entries(fmtMap)) {
-      const colNum = ws.getColumn(key).number;
-      row.getCell(colNum).numFmt = fmt;
+    for (const c of cols) {
+      if (!c.fmt) continue;
+      const colNum = ws.getColumn(c.key).number;
+      row.getCell(colNum).numFmt = c.fmt;
     }
-    // Yellow highlight on New Price CAD + USD (R + S)
     row.getCell(ws.getColumn("newCad").number).fill = HIGHLIGHT_FILL;
     row.getCell(ws.getColumn("newUsd").number).fill = HIGHLIGHT_FILL;
   }
@@ -163,6 +175,7 @@ function round(n: number, digits: number): number {
 
 export async function downloadRepricedXlsx(opts: BuildRepricedOpts): Promise<void> {
   const blob = await buildRepricedXlsx(opts);
-  const scenarioSuffix = opts.scenarioId === "A_Current_Locked" ? "" : `_${opts.scenarioId}`;
+  const scenarioSuffix =
+    opts.scenarioId === "A_Current_Locked" ? "" : `_${opts.scenarioId}`;
   saveAs(blob, `${opts.pe.productSlug}_Repriced${scenarioSuffix}.xlsx`);
 }

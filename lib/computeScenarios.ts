@@ -1,6 +1,10 @@
 import { computeNewPrice, SCENARIOS, ScenarioDef } from "./markupEngine";
-import { OrderReplayRow, OrderReplayData } from "./parseOrderReplay";
-import { PriceEngineData, PriceEngineRow } from "./parsePriceEngine";
+import { OrderReplayRow, OrderReplayData, orderRowKey } from "./parseOrderReplay";
+import {
+  PriceEngineData,
+  PriceEngineRow,
+  indexPriceEngine,
+} from "./parsePriceEngine";
 import { bandOf } from "./qtyBands";
 
 export interface ScenarioResult {
@@ -12,7 +16,6 @@ export interface ScenarioResult {
   deltaUsd: number;
   pctDelta: number;
   annualizedUsd: number;
-  // Customer impact distribution (% of orders)
   dist: {
     noChange: number;
     decrease1to5: number;
@@ -20,9 +23,7 @@ export interface ScenarioResult {
     increase1to5: number;
     increaseGt5: number;
   };
-  // 3-mo $ delta by base qty band [100-1k, 1k-5k, 5k-25k, 25k-100k]
   deltaByBand: [number, number, number, number];
-  // By turnaround
   deltaByTurnaround: { standard: number; rush: number };
   ordersByTurnaround: { standard: number; rush: number };
   paidByTurnaround: { standard: number; rush: number };
@@ -39,10 +40,11 @@ export interface ScenariosOutput {
   matchedOrderRows: number;
   unmatchedOrderRows: number;
   unmatchedSamples: string[];
+  /** Dimensions used for matching — intersection of the two files. */
+  commonDimensions: string[];
 }
 
 function classifyPct(p: number): keyof ScenarioResult["dist"] {
-  // p is a fraction (e.g. 0.04 = +4%)
   if (Math.abs(p) <= 0.01) return "noChange";
   if (p < 0 && p >= -0.05) return "decrease1to5";
   if (p < -0.05) return "decreaseGt5";
@@ -50,25 +52,28 @@ function classifyPct(p: number): keyof ScenarioResult["dist"] {
   return "increaseGt5";
 }
 
-function lookupPriceEngine(
-  row: OrderReplayRow,
-  pe: PriceEngineData
-): PriceEngineRow | null {
-  // Order replay doesn't carry coating; use the no-coating index.
-  return pe.byKeyNoCoating.get(row.keyNoCoating) ?? null;
+export function commonDimensions(
+  pe: PriceEngineData,
+  order: OrderReplayData
+): string[] {
+  const peSet = new Set(pe.dimensions);
+  return order.dimensions.filter((d) => peSet.has(d));
 }
 
 export function computeAllScenarios(
   order: OrderReplayData,
   pe: PriceEngineData
 ): ScenariosOutput {
-  // Pre-resolve each order row's price-engine match once.
+  const common = commonDimensions(pe, order);
+  const peIndex = indexPriceEngine(pe, common);
+
   const resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }> = [];
   let matched = 0;
   let unmatched = 0;
   const unmatchedSamples: string[] = [];
   for (const r of order.rows) {
-    const peRow = lookupPriceEngine(r, pe);
+    const key = orderRowKey(r, common);
+    const peRow = peIndex.get(key) ?? null;
     resolved.push({ row: r, pe: peRow });
     if (peRow) matched += 1;
     else {
@@ -87,6 +92,7 @@ export function computeAllScenarios(
     matchedOrderRows: matched,
     unmatchedOrderRows: unmatched,
     unmatchedSamples,
+    commonDimensions: common,
   };
 }
 
@@ -98,14 +104,12 @@ function runScenario(
   let totalPaid = 0;
   let totalNewRev = 0;
   let totalOrders = 0;
-
   const deltaByBand: [number, number, number, number] = [0, 0, 0, 0];
   const dist = { noChange: 0, decrease1to5: 0, decreaseGt5: 0, increase1to5: 0, increaseGt5: 0 };
   const deltaByTurnaround = { standard: 0, rush: 0 };
   const ordersByTurnaround = { standard: 0, rush: 0 };
   const paidByTurnaround = { standard: 0, rush: 0 };
   const newRevByTurnaround = { standard: 0, rush: 0 };
-
   let matched = 0;
   let unmatched = 0;
 
@@ -133,7 +137,6 @@ function runScenario(
     totalPaid += paidRev;
     totalOrders += row.orders;
     deltaByBand[bandOf(row.qty)] += delta;
-
     if (row.turnaround === "Rush (NBD)") {
       deltaByTurnaround.rush += delta;
       ordersByTurnaround.rush += row.orders;
@@ -145,19 +148,15 @@ function runScenario(
       paidByTurnaround.standard += paidRev;
       newRevByTurnaround.standard += newRev;
     }
-
-    // Customer impact bucketing — per-order using the per-order avg paid vs new price
     if (row.avgPaid > 0) {
       const pct = (r.finalPrice - row.avgPaid) / row.avgPaid;
-      const bucket = classifyPct(pct);
-      dist[bucket] += row.orders;
+      dist[classifyPct(pct)] += row.orders;
     } else {
       dist.noChange += row.orders;
     }
   }
 
   const pctDelta = totalPaid > 0 ? totalDelta / totalPaid : 0;
-  // Convert dist counts to fractions
   const distFractions = {
     noChange: totalOrders > 0 ? dist.noChange / totalOrders : 0,
     decrease1to5: totalOrders > 0 ? dist.decrease1to5 / totalOrders : 0,

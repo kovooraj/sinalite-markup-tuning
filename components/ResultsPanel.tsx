@@ -50,6 +50,13 @@ export function ResultsPanel(props: Props) {
             ? `· ${scenarios.unmatchedOrderRows} replay rows had no price-engine match`
             : ""}
         </li>
+        <li className="text-xs text-zinc-500">
+          🧩 Matched on {scenarios.commonDimensions.length} dimension
+          {scenarios.commonDimensions.length === 1 ? "" : "s"}:{" "}
+          {scenarios.commonDimensions.length > 0
+            ? scenarios.commonDimensions.join(", ")
+            : "stock, size, qty, turnaround only (no shared variants)"}
+        </li>
       </ul>
 
       {recommendation.recommended && (

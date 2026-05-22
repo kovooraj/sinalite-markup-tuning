@@ -1,6 +1,7 @@
 import { computeNewPrice, SCENARIO_BY_ID } from "./markupEngine";
-import { OrderReplayData } from "./parseOrderReplay";
-import { PriceEngineData } from "./parsePriceEngine";
+import { OrderReplayData, orderRowKey } from "./parseOrderReplay";
+import { PriceEngineData, indexPriceEngine } from "./parsePriceEngine";
+import { commonDimensions } from "./computeScenarios";
 
 export interface SelfCheckResult {
   scenarioAComputedDelta: number;
@@ -20,8 +21,6 @@ export function runSelfCheck(
   order: OrderReplayData,
   pe: PriceEngineData
 ): SelfCheckResult {
-  // Per-order detail inputs don't carry a pre-computed Scenario A column,
-  // so there's nothing to diff against. Return a skipped result.
   if (!order.hasPrecomputedScenarioA) {
     return {
       scenarioAComputedDelta: 0,
@@ -36,13 +35,16 @@ export function runSelfCheck(
     };
   }
   const scenarioA = SCENARIO_BY_ID["A_Current_Locked"];
+  const common = commonDimensions(pe, order);
+  const peIndex = indexPriceEngine(pe, common);
+
   let totalDelta = 0;
   let maxRowDiff = 0;
   let rowsCompared = 0;
   let rowsMissed = 0;
 
   for (const r of order.rows) {
-    const match = pe.byKeyNoCoating.get(r.keyNoCoating);
+    const match = peIndex.get(orderRowKey(r, common));
     if (!match) {
       rowsMissed += 1;
       continue;
@@ -74,7 +76,8 @@ export function runSelfCheck(
   if (ok) {
     message = `Scenario A matches replay within ±$${ROW_TOLERANCE.toFixed(2)} per row.`;
   } else if (rowsMissed > rowsCompared) {
-    message = `Most rows could not be matched between price engine and replay. Likely product/coating mismatch.`;
+    message =
+      "Most rows could not be matched between price engine and replay. Likely product/coating mismatch.";
   } else {
     message = `Scenario A drift detected: aggregate diff ${aggDiff.toFixed(2)} (max row diff ${maxRowDiff.toFixed(2)}). Likely a label normalization issue.`;
   }

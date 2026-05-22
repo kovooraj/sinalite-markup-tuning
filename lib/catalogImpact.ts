@@ -1,17 +1,16 @@
 import { computeNewPrice, SCENARIO_BY_ID } from "./markupEngine";
-import { PriceEngineData, PriceEngineRow } from "./parsePriceEngine";
+import { PriceEngineData, indexPriceEngine, isBaseRow } from "./parsePriceEngine";
 import { ScenarioResult } from "./computeScenarios";
 import { bandOf, BASE_BAND_LABELS } from "./qtyBands";
-import { lookupKey } from "./normalize";
+import { buildKey } from "./dimensions";
 
 export interface BaseCatalogImpact {
   impactUsd: number;
   pct: number;
   totalCurrentSP: number;
   rowsScanned: number;
-  // Loss share per band, used to build the concentration narrative
   deltaByBand: [number, number, number, number];
-  concentrationLabel: string; // e.g. "Concentrated in 25k+ band."
+  concentrationLabel: string;
 }
 
 export interface FinishingCatalogImpact {
@@ -27,16 +26,13 @@ export interface NbdLift {
   lowUsd: number;
   highUsd: number;
   orders3mo: number;
-  baseRevenue3mo: number; // standard-revenue context
+  baseRevenue3mo: number;
 }
 
 export function computeBaseCatalogImpact(pe: PriceEngineData): BaseCatalogImpact {
   const A = SCENARIO_BY_ID["A_Current_Locked"];
   const baseRows = pe.rows.filter(
-    (r) =>
-      r.bundling === "No bundling - FREE" &&
-      r.scoring === "None" &&
-      r.turnaround === "Standard"
+    (r) => r.turnaround === "Standard" && isBaseRow(r, pe.dimensions)
   );
   let impact = 0;
   let totalCurrent = 0;
@@ -59,7 +55,6 @@ export function computeBaseCatalogImpact(pe: PriceEngineData): BaseCatalogImpact
     deltaByBand[bandOf(r.qty)] += delta;
   }
 
-  // Concentration: find the band with the largest absolute negative delta
   let maxLossIdx = 0;
   let maxLoss = Infinity;
   for (let i = 0; i < 4; i++) {
@@ -90,8 +85,23 @@ export function computeFinishingCatalogImpact(
   pe: PriceEngineData
 ): FinishingCatalogImpact {
   const A = SCENARIO_BY_ID["A_Current_Locked"];
-  // For each variant row (bundling or scoring), find the matching base row
-  // (same stock/coating/size/qty/turnaround=Standard, bundling=No, scoring=None).
+  // Need to look up the base counterpart of each variant row. Build an index
+  // of base rows keyed on (stock, size, qty, turnaround). Use ALL of the price
+  // engine's dimensions for the variant key (since both sides are PE rows),
+  // but use NONE for the base-counterpart key — i.e. strip dimensions to find
+  // the no-add-on row at the same stock/size/qty/turnaround.
+  const baseIndex = new Map<string, typeof pe.rows[number]>();
+  for (const r of pe.rows) {
+    if (r.turnaround !== "Standard") continue;
+    if (!isBaseRow(r, pe.dimensions)) continue;
+    const k = buildKey(
+      { stock: r.stock, size: r.size, qty: r.qty, turnaround: r.turnaround },
+      {},
+      []
+    );
+    baseIndex.set(k, r);
+  }
+
   let impact = 0;
   let totalCurrentPremium = 0;
   let uplifted = 0;
@@ -99,22 +109,17 @@ export function computeFinishingCatalogImpact(
   let scanned = 0;
   for (const r of pe.rows) {
     if (r.turnaround !== "Standard") continue;
-    const hasFinishing = r.bundling !== "No bundling - FREE" || r.scoring !== "None";
-    if (!hasFinishing) continue;
+    if (isBaseRow(r, pe.dimensions)) continue;
     if (r.currentSalePrice <= 0) continue;
-    const baseKey = lookupKey({
-      stock: r.stock,
-      coating: r.coating,
-      size: r.size,
-      qty: r.qty,
-      turnaround: "Standard",
-      bundling: "No bundling - FREE",
-      scoring: "None",
-    });
-    const baseRow = pe.byKey.get(baseKey);
+    const baseK = buildKey(
+      { stock: r.stock, size: r.size, qty: r.qty, turnaround: r.turnaround },
+      {},
+      []
+    );
+    const baseRow = baseIndex.get(baseK);
     if (!baseRow || baseRow.currentSalePrice <= 0) continue;
     const currentPremium = r.currentSalePrice - baseRow.currentSalePrice;
-    if (currentPremium <= 0) continue; // skip nonsense
+    if (currentPremium <= 0) continue;
     const newPremium = r.finCost * (1 + A.grad.fin[bandOf(r.qty)]);
     const delta = newPremium - currentPremium;
     impact += delta;
@@ -145,4 +150,6 @@ export function computeNbdLift(scenarioA: ScenarioResult): NbdLift {
   };
 }
 
+// avoid unused warning on indexPriceEngine if not used elsewhere
+void indexPriceEngine;
 export const BAND_LABELS_OUT = BASE_BAND_LABELS;
