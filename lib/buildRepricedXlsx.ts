@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { PriceEngineData } from "./parsePriceEngine";
 import { computeNewPrice, ScenarioDef, SCENARIO_BY_ID } from "./markupEngine";
-import { bandOf } from "./qtyBands";
+import { bandOf, nbdBandOf } from "./qtyBands";
 
 export interface BuildRepricedOpts {
   pe: PriceEngineData;
@@ -88,8 +88,10 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
     { header: "Finishing Cost (CAD)", key: "finCost", width: 16, fmt: FMT_CURRENCY },
     { header: "Base Markup %", key: "baseMarkup", width: 12, fmt: FMT_PCT },
     { header: "Finishing Markup %", key: "finMarkup", width: 14, fmt: FMT_PCT },
+    { header: "NBD Markup %", key: "nbdMarkup", width: 12, fmt: FMT_PCT },
     { header: "Marked-up Base (CAD)", key: "markedBase", width: 16, fmt: FMT_CURRENCY },
     { header: "Marked-up Finishing (CAD)", key: "markedFin", width: 18, fmt: FMT_CURRENCY },
+    { header: "Subtotal Before NBD (CAD)", key: "subtotalPreNbd", width: 18, fmt: FMT_CURRENCY },
     { header: "New Price CAD", key: "newCad", width: 14, fmt: FMT_CURRENCY },
     { header: usdHeader, key: "newUsd", width: 18, fmt: FMT_CURRENCY },
     { header: "Delta vs sale price (CAD)", key: "delta", width: 18, fmt: FMT_CURRENCY }
@@ -109,16 +111,19 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
     const band = bandOf(r.qty);
     const baseMkup = scenario.grad.base[band];
     const finMkup = scenario.grad.fin[band];
+    const isRush = r.turnaround === "Rush (NBD)";
+    const nbdMkup = isRush ? scenario.grad.nbd[nbdBandOf(r.qty)] : 0;
     const res = computeNewPrice(
       {
         qty: r.qty,
         baseCost: r.baseCost,
         finCost: r.finCost,
-        isRush: r.turnaround === "Rush (NBD)",
+        isRush,
         currentSalePrice: 0,
       },
       scenario.grad
     );
+    const subtotalPreNbd = res.basePrice + res.finPrice;
     const newCad = res.uncappedPrice;
     const newUsd = newCad * opts.usdRate;
     const delta = newCad - r.currentSalePrice;
@@ -135,8 +140,10 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
       finCost: round(r.finCost, 4),
       baseMarkup: baseMkup,
       finMarkup: finMkup,
+      nbdMarkup: nbdMkup,
       markedBase: round(res.basePrice, 4),
       markedFin: round(res.finPrice, 4),
+      subtotalPreNbd: round(subtotalPreNbd, 2),
       newCad: round(newCad, 2),
       newUsd: round(newUsd, 2),
       delta: round(delta, 2),

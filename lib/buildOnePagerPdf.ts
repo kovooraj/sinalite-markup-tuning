@@ -21,10 +21,31 @@ export interface OnePagerPdfOpts {
 }
 
 // --- formatters ---------------------------------------------------------
+// All values rendered into the PDF must be ASCII. jsPDF's default Helvetica
+// doesn't carry the Unicode minus (U+2212), em dash, multiplication, warning,
+// or star glyphs, and falls back in ways that break kerning and cause line
+// overflow. asciiSafe() and asciiClean() normalize everything to plain ASCII.
+
+function asciiSafe(s: string): string {
+  return s
+    .replace(/[−–—]/g, "-") // minus, en dash, em dash
+    .replace(/[×]/g, "x") // multiplication sign
+    .replace(/[→]/g, "->") // right arrow
+    .replace(/[⚠⚡]/g, "!") // warning
+    .replace(/[★☆]/g, "*") // black/white star
+    .replace(/[✓✔]/g, "+") // checkmarks
+    .replace(/[ ]/g, " ") // nbsp
+    .replace(/[‘’]/g, "'") // smart single quotes
+    .replace(/[“”]/g, '"') // smart double quotes
+    .replace(/[Δ∆]/g, "Delta") // greek delta + math increment
+    // Catch-all: any remaining non-ASCII char becomes "?" so a stray
+    // Unicode glyph never silently breaks line measurement again.
+    .replace(/[^\x20-\x7E\n]/g, "?");
+}
 
 function fmtUsd(v: number, opts: { signed?: boolean } = {}): string {
   const abs = Math.abs(v);
-  const sign = opts.signed ? (v >= 0 ? "+" : "−") : v < 0 ? "−" : "";
+  const sign = opts.signed ? (v >= 0 ? "+" : "-") : v < 0 ? "-" : "";
   return `${sign}$${abs.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -32,11 +53,11 @@ function fmtUsd(v: number, opts: { signed?: boolean } = {}): string {
 }
 function fmtUsdK(v: number): string {
   const abs = Math.abs(v);
-  const sign = v < 0 ? "−" : "+";
+  const sign = v < 0 ? "-" : "+";
   return `${sign}$${(abs / 1000).toFixed(0)}K`;
 }
 function fmtPct(v: number): string {
-  const sign = v < 0 ? "−" : "+";
+  const sign = v < 0 ? "-" : "+";
   return `${sign}${Math.abs(v * 100).toFixed(1)}%`;
 }
 
@@ -64,7 +85,7 @@ function heading(doc: jsPDF, c: Cursor, text: string) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(20, 20, 20);
-  doc.text(text, MARGIN, c.y);
+  doc.text(asciiSafe(text), MARGIN, c.y);
   c.y += 14;
 }
 
@@ -79,10 +100,15 @@ function para(
   doc.setFont("helvetica", style);
   doc.setFontSize(size);
   doc.setTextColor(...(opts.color ?? [60, 60, 60]));
-  const lines = doc.splitTextToSize(text, CONTENT_W);
+  const clean = asciiSafe(text);
+  const lines = doc.splitTextToSize(clean, CONTENT_W);
   ensureSpace(doc, c, lines.length * (size + 2) + 2);
   doc.text(lines, MARGIN, c.y);
   c.y += lines.length * (size + 2) + 2;
+}
+
+function cleanRows(rows: string[][]): string[][] {
+  return rows.map((r) => r.map(asciiSafe));
 }
 
 function markupTable(
@@ -94,10 +120,10 @@ function markupTable(
   ensureSpace(doc, c, 12 + rows.length * 14);
   autoTable(doc, {
     startY: c.y,
-    head: [head],
-    body: rows,
+    head: [head.map(asciiSafe)],
+    body: cleanRows(rows),
     margin: { left: MARGIN, right: MARGIN },
-    styles: { font: "helvetica", fontSize: 8.5, cellPadding: 3, lineColor: [180, 180, 180], lineWidth: 0.3 },
+    styles: { font: "helvetica", fontSize: 8.5, cellPadding: 3, lineColor: [180, 180, 180], lineWidth: 0.3, overflow: "linebreak" },
     headStyles: { fillColor: [31, 56, 100], textColor: [255, 255, 255], fontStyle: "bold", halign: "left" },
     tableWidth: CONTENT_W,
   });
@@ -116,7 +142,11 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
   doc.setTextColor(20, 20, 20);
-  doc.text(`${opts.productName} — Locked Markup Reference`, MARGIN, c.y + 8);
+  doc.text(
+    asciiSafe(`${opts.productName} - Locked Markup Reference`),
+    MARGIN,
+    c.y + 8
+  );
   c.y += 22;
 
   // Subtitle
@@ -132,12 +162,12 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   para(doc, c, "Applied to PE3 base cost. Volume-discount gradient — markup decreases as qty rises.");
   para(doc, c, "Formula:  Base Price = MIN(PE3 Base Cost × (1 + Markup %), Current Sale Price)", { bold: true });
   markupTable(doc, c,
-    ["Qty Band", "Markup %", "Multiplier", "Example: $30 cost  →"],
+    ["Qty Band", "Markup %", "Multiplier", "Example: $30 cost ->"],
     [
-      ["100 – 1,000", `${Math.round(A.grad.base[0] * 100)}%`, `${(1 + A.grad.base[0]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[0])).toFixed(2)}`],
-      ["1,001 – 5,000", `${Math.round(A.grad.base[1] * 100)}%`, `${(1 + A.grad.base[1]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[1])).toFixed(2)}`],
-      ["5,001 – 25,000", `${Math.round(A.grad.base[2] * 100)}%`, `${(1 + A.grad.base[2]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[2])).toFixed(2)}`],
-      ["25,001 – 100,000", `${Math.round(A.grad.base[3] * 100)}%`, `${(1 + A.grad.base[3]).toFixed(2)}×`, `$${(30 * (1 + A.grad.base[3])).toFixed(2)}`],
+      ["100 - 1,000", `${Math.round(A.grad.base[0] * 100)}%`, `${(1 + A.grad.base[0]).toFixed(2)}x`, `$${(30 * (1 + A.grad.base[0])).toFixed(2)}`],
+      ["1,001 - 5,000", `${Math.round(A.grad.base[1] * 100)}%`, `${(1 + A.grad.base[1]).toFixed(2)}x`, `$${(30 * (1 + A.grad.base[1])).toFixed(2)}`],
+      ["5,001 - 25,000", `${Math.round(A.grad.base[2] * 100)}%`, `${(1 + A.grad.base[2]).toFixed(2)}x`, `$${(30 * (1 + A.grad.base[2])).toFixed(2)}`],
+      ["25,001 - 100,000", `${Math.round(A.grad.base[3] * 100)}%`, `${(1 + A.grad.base[3]).toFixed(2)}x`, `$${(30 * (1 + A.grad.base[3])).toFixed(2)}`],
     ]
   );
   const concLine = opts.baseImpact.concentrationLabel ? ` ${opts.baseImpact.concentrationLabel}` : "";
@@ -151,12 +181,12 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   para(doc, c, "Applies to all 8 bundling types (Single band 100s/50s/25s, Double band 100s/50s/25s, Shrink Wrap 50s/25s) + Score in Half.");
   para(doc, c, "Formula:  Add-on Price = PE3 Marginal Cost × (1 + Markup %)", { bold: true });
   markupTable(doc, c,
-    ["Qty Band", "Markup %", "Multiplier", "Example: $10 marginal cost  →"],
+    ["Qty Band", "Markup %", "Multiplier", "Example: $10 marginal cost ->"],
     [
-      ["100 – 1,000", `${Math.round(A.grad.fin[0] * 100)}%`, `${(1 + A.grad.fin[0]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[0])).toFixed(2)} add-on`],
-      ["1,001 – 5,000", `${Math.round(A.grad.fin[1] * 100)}%`, `${(1 + A.grad.fin[1]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[1])).toFixed(2)} add-on`],
-      ["5,001 – 25,000", `${Math.round(A.grad.fin[2] * 100)}%`, `${(1 + A.grad.fin[2]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[2])).toFixed(2)} add-on`],
-      ["25,001 – 100,000", `${Math.round(A.grad.fin[3] * 100)}%`, `${(1 + A.grad.fin[3]).toFixed(2)}×`, `$${(10 * (1 + A.grad.fin[3])).toFixed(2)} add-on`],
+      ["100 - 1,000", `${Math.round(A.grad.fin[0] * 100)}%`, `${(1 + A.grad.fin[0]).toFixed(2)}x`, `$${(10 * (1 + A.grad.fin[0])).toFixed(2)} add-on`],
+      ["1,001 - 5,000", `${Math.round(A.grad.fin[1] * 100)}%`, `${(1 + A.grad.fin[1]).toFixed(2)}x`, `$${(10 * (1 + A.grad.fin[1])).toFixed(2)} add-on`],
+      ["5,001 - 25,000", `${Math.round(A.grad.fin[2] * 100)}%`, `${(1 + A.grad.fin[2]).toFixed(2)}x`, `$${(10 * (1 + A.grad.fin[2])).toFixed(2)} add-on`],
+      ["25,001 - 100,000", `${Math.round(A.grad.fin[3] * 100)}%`, `${(1 + A.grad.fin[3]).toFixed(2)}x`, `$${(10 * (1 + A.grad.fin[3])).toFixed(2)} add-on`],
     ]
   );
   para(doc, c,
@@ -169,11 +199,11 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   para(doc, c, "Multiplier applied to TOTAL order subtotal (base + bundling + scoring) when customer selects rush.");
   para(doc, c, "Formula:  Final Price = (Base + Add-ons) × (1 + NBD Markup),  capped at current published NBD price", { bold: true });
   markupTable(doc, c,
-    ["Qty Band", "Markup %", "Multiplier", "Example: $50 subtotal  →"],
+    ["Qty Band", "Markup %", "Multiplier", "Example: $50 subtotal ->"],
     [
-      ["100 – 5,000", `${Math.round(A.grad.nbd[0] * 100)}%`, `${(1 + A.grad.nbd[0]).toFixed(2)}×`, `$${(50 * (1 + A.grad.nbd[0])).toFixed(2)} final`],
-      ["5,001 – 25,000", `${Math.round(A.grad.nbd[1] * 100)}%`, `${(1 + A.grad.nbd[1]).toFixed(2)}×`, `$${(50 * (1 + A.grad.nbd[1])).toFixed(2)} final`],
-      ["25,001 – 100,000", `${Math.round(A.grad.nbd[2] * 100)}%`, `${(1 + A.grad.nbd[2]).toFixed(2)}×`, `$${(50 * (1 + A.grad.nbd[2])).toFixed(2)} final`],
+      ["100 - 5,000", `${Math.round(A.grad.nbd[0] * 100)}%`, `${(1 + A.grad.nbd[0]).toFixed(2)}x`, `$${(50 * (1 + A.grad.nbd[0])).toFixed(2)} final`],
+      ["5,001 - 25,000", `${Math.round(A.grad.nbd[1] * 100)}%`, `${(1 + A.grad.nbd[1]).toFixed(2)}x`, `$${(50 * (1 + A.grad.nbd[1])).toFixed(2)} final`],
+      ["25,001 - 100,000", `${Math.round(A.grad.nbd[2] * 100)}%`, `${(1 + A.grad.nbd[2]).toFixed(2)}x`, `$${(50 * (1 + A.grad.nbd[2])).toFixed(2)} final`],
     ]
   );
   para(doc, c,
@@ -204,10 +234,10 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   ensureSpace(doc, c, 60);
   autoTable(doc, {
     startY: c.y,
-    head: [["Size × Qty", "Base $", "Add-on $", "Net 90-day $", "Verdict", "Action"]],
-    body: [...llRows, totalRow],
+    head: [["Size x Qty", "Base $", "Add-on $", "Net 90-day $", "Verdict", "Action"]],
+    body: cleanRows([...llRows, totalRow]),
     margin: { left: MARGIN, right: MARGIN },
-    styles: { font: "helvetica", fontSize: 8, cellPadding: 2.5, lineColor: [180, 180, 180], lineWidth: 0.3 },
+    styles: { font: "helvetica", fontSize: 8, cellPadding: 2.5, lineColor: [180, 180, 180], lineWidth: 0.3, overflow: "linebreak" },
     headStyles: { fillColor: [31, 56, 100], textColor: [255, 255, 255], fontStyle: "bold" },
     didParseCell: (data) => {
       if (data.section === "body" && data.row.index === llRows.length) {
@@ -220,9 +250,13 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   c.y = (doc as any).lastAutoTable.finalY + 4;
   if (opts.lossLeaders.callout) {
-    const qtys = opts.lossLeaders.callout.qtys.map((q) => (q >= 1000 ? `${q / 1000}k` : String(q))).join(" / ");
-    para(doc, c,
-      `⚠ The ${opts.lossLeaders.callout.sizeFamily} family at ${qtys} qtys drives ${fmtUsd(opts.lossLeaders.callout.totalLoss, { signed: true })} of the loss alone. Structurally unprofitable even with add-ons. Flagged for Q3 pricing review.`,
+    const qtys = opts.lossLeaders.callout.qtys
+      .map((q) => (q >= 1000 ? `${q / 1000}k` : String(q)))
+      .join(" / ");
+    para(
+      doc,
+      c,
+      `Note: The ${opts.lossLeaders.callout.sizeFamily} family at ${qtys} qtys drives ${fmtUsd(opts.lossLeaders.callout.totalLoss, { signed: true })} of the loss alone. Structurally unprofitable even with add-ons. Flagged for Q3 pricing review.`,
       { italic: true }
     );
   }
@@ -261,7 +295,7 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
 
   const altScenarios = [...rec.inBand].sort((a, b) => a.pctDelta - b.pctDelta);
   if (altScenarios.length > 0) {
-    para(doc, c, "In-band alternatives (sorted by % Δ):", { size: 8.5 });
+    para(doc, c, "In-band alternatives (sorted by % Delta):", { size: 8.5 });
     const altBody = altScenarios.map((s) => [
       s.id,
       s.baseFormatted,
@@ -269,16 +303,16 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
       s.nbdFormatted,
       fmtUsd(s.deltaUsd, { signed: true }),
       `${(s.pctDelta * 100).toFixed(2)}%`,
-      s.id === recRow?.id ? "★ Recommended" : "✓ In band",
+      s.id === recRow?.id ? "* Recommended" : "+ In band",
     ]);
     ensureSpace(doc, c, 12 + altBody.length * 11);
     const recIdx = altScenarios.findIndex((s) => s.id === recRow?.id);
     autoTable(doc, {
       startY: c.y,
-      head: [["Scenario", "Base", "Finishing", "NBD", "3-mo Δ", "% Δ", "Status"]],
-      body: altBody,
+      head: [["Scenario", "Base", "Finishing", "NBD", "3-mo Delta", "% Delta", "Status"]],
+      body: cleanRows(altBody),
       margin: { left: MARGIN, right: MARGIN },
-      styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2, lineColor: [180, 180, 180], lineWidth: 0.3 },
+      styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2, lineColor: [180, 180, 180], lineWidth: 0.3, overflow: "linebreak" },
       headStyles: { fillColor: [31, 56, 100], textColor: [255, 255, 255], fontStyle: "bold" },
       didParseCell: (data) => {
         if (data.section === "body" && data.row.index === recIdx) {
