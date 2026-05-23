@@ -79,14 +79,25 @@ function ensureSpace(doc: jsPDF, c: Cursor, needed: number) {
   }
 }
 
+// jsPDF positions text by its baseline, not its top. To keep "draw at c.y"
+// mean "text TOP aligns with c.y" (so it doesn't overlap content above), we
+// advance the cursor by the font's ascender BEFORE calling doc.text, then
+// advance again past remaining lines + a small bottom gap.
+const ASCENDER_RATIO = 0.85; // helvetica ascender ≈ 85% of nominal size
+const LINE_GAP_RATIO = 1.25; // ~25% line spacing
+const BOTTOM_GAP = 4;
+
 function heading(doc: jsPDF, c: Cursor, text: string) {
-  ensureSpace(doc, c, 22);
-  c.y += 6;
+  const size = 11;
+  const ascender = size * ASCENDER_RATIO;
+  const topGap = 8;
+  ensureSpace(doc, c, topGap + ascender + 4);
+  c.y += topGap + ascender;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.setFontSize(size);
   doc.setTextColor(20, 20, 20);
   doc.text(asciiSafe(text), MARGIN, c.y);
-  c.y += 14;
+  c.y += 4;
 }
 
 function para(
@@ -96,15 +107,31 @@ function para(
   opts: { bold?: boolean; italic?: boolean; size?: number; color?: [number, number, number] } = {}
 ) {
   const size = opts.size ?? 9;
-  const style = opts.bold ? (opts.italic ? "bolditalic" : "bold") : opts.italic ? "italic" : "normal";
+  const ascender = size * ASCENDER_RATIO;
+  const lineHeight = size * LINE_GAP_RATIO;
+  const style = opts.bold
+    ? opts.italic
+      ? "bolditalic"
+      : "bold"
+    : opts.italic
+      ? "italic"
+      : "normal";
   doc.setFont("helvetica", style);
   doc.setFontSize(size);
   doc.setTextColor(...(opts.color ?? [60, 60, 60]));
   const clean = asciiSafe(text);
   const lines = doc.splitTextToSize(clean, CONTENT_W);
-  ensureSpace(doc, c, lines.length * (size + 2) + 2);
-  doc.text(lines, MARGIN, c.y);
-  c.y += lines.length * (size + 2) + 2;
+  const totalHeight =
+    ascender + (lines.length - 1) * lineHeight + BOTTOM_GAP;
+  ensureSpace(doc, c, totalHeight);
+  c.y += ascender;
+  // jspdf can render the whole array in one call; it auto-steps by font size
+  // but our lineHeight is a touch larger, so iterate to control spacing.
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) c.y += lineHeight;
+    doc.text(lines[i], MARGIN, c.y);
+  }
+  c.y += BOTTOM_GAP;
 }
 
 function cleanRows(rows: string[][]): string[][] {
@@ -142,12 +169,14 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
   doc.setTextColor(20, 20, 20);
+  const titleAscender = 15 * ASCENDER_RATIO;
+  c.y += titleAscender;
   doc.text(
     asciiSafe(`${opts.productName} - Locked Markup Reference`),
     MARGIN,
-    c.y + 8
+    c.y
   );
-  c.y += 22;
+  c.y += 8;
 
   // Subtitle
   para(
@@ -331,8 +360,10 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(20, 20, 20);
+  const refAscender = 10 * ASCENDER_RATIO;
+  c.y += refAscender;
   doc.text("Reference", MARGIN, c.y);
-  c.y += 12;
+  c.y += 4;
   para(doc, c,
     `Notion: Pricing Model Comparison + 7 sub-pages  |  Owner: ${opts.owner || "—"}  |  Locked: ${opts.lockedDate}`,
     { size: 8 }
