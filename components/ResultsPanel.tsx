@@ -19,6 +19,7 @@ interface Props {
   onDownloadOnePager: () => void;
   onDownloadScenarios: () => void;
   onDownloadRepriced: (scenarioId: string) => void;
+  onDownloadAnnotatedOrders: (scenarioId: string) => void;
 }
 
 function fmtUsd(v: number): string {
@@ -109,6 +110,7 @@ export function ResultsPanel(props: Props) {
               <th className="border border-zinc-200 px-2 py-1 text-right">Annualized</th>
               <th className="border border-zinc-200 px-2 py-1">Status</th>
               <th className="border border-zinc-200 px-2 py-1">Repriced Catalog</th>
+              <th className="border border-zinc-200 px-2 py-1">Annotated Orders</th>
             </tr>
           </thead>
           <tbody>
@@ -154,7 +156,23 @@ export function ResultsPanel(props: Props) {
                           ? "bg-green-600 hover:bg-green-700"
                           : "bg-zinc-700 hover:bg-zinc-800",
                       ].join(" ")}
-                      title={`Download repriced catalog using ${s.id}`}
+                      title={`Download repriced PE3 catalog using ${s.id}`}
+                    >
+                      {isRecommended ? "⬇ ★ Download" : "⬇ Download"}
+                    </button>
+                  </td>
+                  <td className="border border-zinc-200 px-2 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => props.onDownloadAnnotatedOrders(s.id)}
+                      disabled={props.generating}
+                      className={[
+                        "rounded px-2 py-1 text-xs font-medium text-white disabled:opacity-50",
+                        isRecommended
+                          ? "bg-green-600 hover:bg-green-700"
+                          : "bg-zinc-700 hover:bg-zinc-800",
+                      ].join(" ")}
+                      title={`Download annotated 3-month orders with ${s.id}'s markup chain applied per order`}
                     >
                       {isRecommended ? "⬇ ★ Download" : "⬇ Download"}
                     </button>
@@ -185,9 +203,13 @@ export function ResultsPanel(props: Props) {
         </button>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Repriced catalog per scenario: click the ⬇ button on any row above. The
-        ★ green row is the system's pick (best fit to your target band with
-        smallest customer-impact drift).
+        Per-scenario downloads (any row above):{" "}
+        <span className="font-medium">Repriced Catalog</span> — the full PE3
+        catalog with new prices applied;{" "}
+        <span className="font-medium">Annotated Orders</span> — your 3-month
+        order data with each order&apos;s base + finishing + NBD markup chain
+        shown end-to-end, totals + annualized delta at the bottom. The ★ green
+        row is the system&apos;s pick.
       </p>
     </div>
   );

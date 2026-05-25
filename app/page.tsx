@@ -18,6 +18,7 @@ import { computeLossLeaders } from "@/lib/lossLeaders";
 import { downloadScenariosXlsx } from "@/lib/buildScenariosXlsx";
 import { downloadOnePagerPdf } from "@/lib/buildOnePagerPdf";
 import { downloadRepricedXlsx } from "@/lib/buildRepricedXlsx";
+import { downloadAnnotatedOrdersXlsx } from "@/lib/buildAnnotatedOrdersXlsx";
 
 interface ComputedState {
   pe: PriceEngineData;
@@ -234,6 +235,22 @@ export default function Home() {
     }
   }
 
+  async function handleDownloadAnnotatedOrders(scenarioId: string) {
+    if (!computed) return;
+    setGenerating(true);
+    try {
+      await downloadAnnotatedOrdersXlsx({
+        pe: computed.pe,
+        order: computed.order,
+        scenarioId,
+        usdRate: meta.usdRate || 0.7,
+        productSlug: computed.pe.productSlug,
+      });
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function handleDownloadOnePager() {
     if (!computed) return;
     setGenerating(true);
@@ -341,6 +358,7 @@ export default function Home() {
             onDownloadOnePager={handleDownloadOnePager}
             onDownloadScenarios={handleDownloadScenarios}
             onDownloadRepriced={handleDownloadRepriced}
+            onDownloadAnnotatedOrders={handleDownloadAnnotatedOrders}
           />
         )}
       </section>
