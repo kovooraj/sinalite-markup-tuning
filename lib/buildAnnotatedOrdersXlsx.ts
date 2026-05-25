@@ -87,16 +87,28 @@ export async function buildAnnotatedOrdersXlsx(
 
   const usdHeader = `New Price USD (@${opts.usdRate.toFixed(2)})`;
 
-  // Dynamic columns: original-order identifying fields + product dims +
-  // computed markup chain + delta math
+  // Dynamic columns: identifier columns (UID, Order ID, etc.) →
+  // SKU descriptors → product dims → computed markup chain → delta math
   type Col = { header: string; key: string; width: number; fmt?: string };
-  const cols: Col[] = [
+  const cols: Col[] = [];
+  // Identifier columns first so SL_ numbers / Order IDs are immediately
+  // scannable at the left edge of the sheet
+  for (const idCol of opts.order.identifierColumns) {
+    const isDate = idCol.key === "orderDate";
+    const isLongId = idCol.key === "uid" || idCol.key === "orderId";
+    cols.push({
+      header: idCol.label,
+      key: `id_${idCol.key}`,
+      width: isDate ? 20 : isLongId ? 16 : 12,
+    });
+  }
+  cols.push(
     { header: "Description", key: "description", width: 36 },
     { header: "Qty", key: "qty", width: 9, fmt: FMT_INT },
     { header: "Stock", key: "stock", width: 28 },
     { header: "Size", key: "size", width: 12 },
-    { header: "Turnaround", key: "turnaround", width: 18 },
-  ];
+    { header: "Turnaround", key: "turnaround", width: 18 }
+  );
   // Order-side dimensions are typically a subset of pe.dimensions; show
   // whichever are present in either file so the row is fully identified.
   const allDims = Array.from(
@@ -199,6 +211,9 @@ export async function buildAnnotatedOrdersXlsx(
       orders: r.orders,
       avgPaid: round(r.avgPaid, 2),
     };
+    for (const idCol of opts.order.identifierColumns) {
+      baseRow[`id_${idCol.key}`] = r.identifiers[idCol.key] ?? "";
+    }
     for (const dim of allDims) {
       baseRow[`dim_${dim}`] = r.dims[dim] ?? "";
     }
@@ -318,6 +333,8 @@ export async function buildAnnotatedOrdersXlsx(
     annualizedDelta: round(aggregateDelta * 4, 2),
   };
   for (const dim of allDims) totalRow[`dim_${dim}`] = "";
+  for (const idCol of opts.order.identifierColumns)
+    totalRow[`id_${idCol.key}`] = "";
   ws.addRow(totalRow);
   const totalR = ws.rowCount;
   const trRow = ws.getRow(totalR);

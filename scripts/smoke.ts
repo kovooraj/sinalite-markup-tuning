@@ -171,6 +171,7 @@ const pdfBlob = buildOnePagerPdf({
   recommendation: rec,
   targetMinPct,
   targetMaxPct,
+  costCenters: pe.costCenters,
 });
 await writeFile(
   `out/${pe.productSlug}_Markup_Reference_OnePager.pdf`,

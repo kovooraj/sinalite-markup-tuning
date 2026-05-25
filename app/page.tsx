@@ -267,6 +267,7 @@ export default function Home() {
         recommendation: computed.recommendation,
         targetMinPct: meta.targetMinPct,
         targetMaxPct: meta.targetMaxPct,
+        costCenters: computed.pe.costCenters,
       });
     } finally {
       setGenerating(false);

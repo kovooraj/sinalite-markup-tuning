@@ -37,6 +37,9 @@ export interface PriceEngineData {
   hasStock: boolean;
   rows: PriceEngineRow[];
   warnings: string[];
+  /** Cost centers (machine / stage names) encountered while decomposing the
+   * breakdown column, classified by how this tool bucketed them. */
+  costCenters: { base: string[]; finishing: string[] };
 }
 
 const FINISHING_MACHINE_PATTERNS = [
@@ -55,7 +58,11 @@ function isFinishingMachine(name: string): boolean {
   return FINISHING_MACHINE_PATTERNS.some((re) => re.test(name));
 }
 
-function extractCostBreakdown(cells: (string | number | null)[]): {
+function extractCostBreakdown(
+  cells: (string | number | null)[],
+  baseSeen: Set<string>,
+  finSeen: Set<string>
+): {
   baseCost: number;
   finCost: number;
 } {
@@ -84,9 +91,14 @@ function extractCostBreakdown(cells: (string | number | null)[]): {
         }
         j += 1;
       }
-      if (totalCost !== null) {
-        if (isFinishingMachine(machine)) finCost += totalCost;
-        else baseCost += totalCost;
+      if (totalCost !== null && machine) {
+        if (isFinishingMachine(machine)) {
+          finCost += totalCost;
+          finSeen.add(machine);
+        } else {
+          baseCost += totalCost;
+          baseSeen.add(machine);
+        }
       }
       i = j;
     } else {
@@ -208,6 +220,8 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
 
   const rows: PriceEngineRow[] = [];
   const warnings: string[] = [];
+  const baseSeen = new Set<string>();
+  const finSeen = new Set<string>();
 
   for (let r = 1; r < aoa.length; r++) {
     const row = aoa[r];
@@ -238,7 +252,11 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     }
 
     const breakdownCells = row.slice(breakdownStart);
-    const { baseCost, finCost } = extractCostBreakdown(breakdownCells);
+    const { baseCost, finCost } = extractCostBreakdown(
+      breakdownCells,
+      baseSeen,
+      finSeen
+    );
 
     rows.push({
       productName: String(productName).trim(),
@@ -275,6 +293,10 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     hasStock,
     rows,
     warnings,
+    costCenters: {
+      base: Array.from(baseSeen).sort(),
+      finishing: Array.from(finSeen).sort(),
+    },
   };
 }
 

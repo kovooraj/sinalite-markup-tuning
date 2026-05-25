@@ -17,6 +17,10 @@ export interface OrderReplayRow {
   size: string;
   /** All optional dimensional fields detected on this row. */
   dims: RowDimensions;
+  /** Per-row identifying columns captured from the source file (UID,
+   * Order ID, Order Date, Store, Customer ID, Currency, Ship State, Ship
+   * Country). Only the keys that existed in the source appear here. */
+  identifiers: Record<string, string>;
   orders: number;
   actualPaid: number;
   avgPaid: number;
@@ -39,6 +43,10 @@ export interface OrderReplayData {
   dimensions: string[];
   /** True when at least one row carries a non-empty Stock value. */
   hasStock: boolean;
+  /** Identifier columns detected in the source — used to render them in the
+   * Annotated Orders output. Each entry is { key, label }, ordered as they
+   * should appear in output. */
+  identifierColumns: Array<{ key: string; label: string }>;
   rows: OrderReplayRow[];
   totals: {
     orders: number;
@@ -115,6 +123,48 @@ interface ColMap {
   baseCost: number;
   baseSP: number;
   variantSP: number;
+}
+
+/** Identifier columns we capture verbatim for the Annotated Orders output.
+ * Each entry maps a canonical key to the column-name aliases that mean it. */
+const IDENTIFIER_COLS: Array<{ key: string; aliases: string[]; label: string }> = [
+  { key: "uid", aliases: ["UID", "Line UID"], label: "UID" },
+  { key: "orderId", aliases: ["Order ID", "OrderID"], label: "Order ID" },
+  { key: "orderDate", aliases: ["Order Date", "Date"], label: "Order Date" },
+  { key: "store", aliases: ["Store"], label: "Store" },
+  { key: "customerId", aliases: ["Customer ID", "Customer"], label: "Customer ID" },
+  { key: "currency", aliases: ["Currency"], label: "Currency" },
+  { key: "shipState", aliases: ["Ship State", "State"], label: "Ship State" },
+  { key: "shipCountry", aliases: ["Ship Country", "Country"], label: "Ship Country" },
+  { key: "orderStatus", aliases: ["Order Status", "Status"], label: "Order Status" },
+];
+
+function detectIdentifierCols(
+  header: (string | number | null)[]
+): Array<{ key: string; index: number; label: string }> {
+  const out: Array<{ key: string; index: number; label: string }> = [];
+  for (const def of IDENTIFIER_COLS) {
+    const i = findColIndex(header, def.aliases);
+    if (i >= 0) out.push({ key: def.key, index: i, label: def.label });
+  }
+  return out;
+}
+
+function readIdentifiers(
+  row: (string | number | null)[],
+  detected: Array<{ key: string; index: number; label: string }>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const d of detected) {
+    const v: unknown = row[d.index];
+    if (v === null || v === undefined || v === "") continue;
+    if (v instanceof Date) {
+      out[d.key] = v.toISOString().slice(0, 19).replace("T", " ");
+    } else {
+      out[d.key] = String(v).trim();
+    }
+  }
+  return out;
 }
 
 function buildColMap(header: (string | number | null)[]): ColMap {
@@ -223,7 +273,8 @@ function readDims(
 function rowsForPerSku(
   aoa: (string | number | null)[][],
   m: ColMap,
-  dimIdx: Record<string, number>
+  dimIdx: Record<string, number>,
+  idCols: Array<{ key: string; index: number; label: string }>
 ): {
   rows: OrderReplayRow[];
   totals: { orders: number; actualPaid: number; newRevenue: number };
@@ -253,6 +304,7 @@ function rowsForPerSku(
       stock,
       size,
       dims: readDims(row, dimIdx),
+      identifiers: readIdentifiers(row, idCols),
       orders,
       actualPaid,
       avgPaid,
@@ -278,6 +330,7 @@ function rowsForPerOrder(
   aoa: (string | number | null)[][],
   m: ColMap,
   dimIdx: Record<string, number>,
+  idCols: Array<{ key: string; index: number; label: string }>,
   cadFromUsd: number
 ): {
   rows: OrderReplayRow[];
@@ -312,6 +365,7 @@ function rowsForPerOrder(
       stock,
       size,
       dims: readDims(row, dimIdx),
+      identifiers: readIdentifiers(row, idCols),
       orders: 1,
       actualPaid: salePrice,
       avgPaid: salePrice,
@@ -456,6 +510,7 @@ export async function parseOrderReplay(
   const m = buildColMap(aoa[0]);
   const dimIdx = detectDimensions(aoa[0]);
   const dimensions = Object.keys(dimIdx).sort();
+  const idCols = detectIdentifierCols(aoa[0]);
 
   // Required-column guard per format. Stock is OPTIONAL — many product files
   // omit it because the file is scoped to one product variant.
@@ -497,9 +552,9 @@ export async function parseOrderReplay(
   let usdConverted = 0;
 
   if (format === "per_sku_aggregated") {
-    result = rowsForPerSku(aoa, m, dimIdx);
+    result = rowsForPerSku(aoa, m, dimIdx, idCols);
   } else {
-    const r2 = rowsForPerOrder(aoa, m, dimIdx, cadFromUsd);
+    const r2 = rowsForPerOrder(aoa, m, dimIdx, idCols, cadFromUsd);
     result = { rows: r2.rows, totals: r2.totals };
     usdConverted = r2.usdRowsConverted;
     if (usdConverted > 0) {
@@ -518,6 +573,7 @@ export async function parseOrderReplay(
     format,
     dimensions,
     hasStock: result.rows.some((r) => !!r.stock),
+    identifierColumns: idCols.map(({ key, label }) => ({ key, label })),
     rows: result.rows,
     totals: {
       orders: result.totals.orders,

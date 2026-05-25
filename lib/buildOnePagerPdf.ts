@@ -18,6 +18,10 @@ export interface OnePagerPdfOpts {
   recommendation: Recommendation;
   targetMinPct: number;
   targetMaxPct: number;
+  /** Production stages bucketed during PE3 parsing. Shown verbatim near the
+   * top of the 1-pager so reviewers know what "Base" and "Finishing" mean
+   * for this specific product. */
+  costCenters: { base: string[]; finishing: string[] };
 }
 
 // --- formatters ---------------------------------------------------------
@@ -185,6 +189,37 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
     `Decisions locked ${opts.lockedDate}  |  Cap rule applies to ALL: final price = MIN(model price, current published price)`,
     { italic: true, size: 8.5 }
   );
+
+  // Cost Center Classification — surfaces which PE3 production stages this
+  // tool bucketed into Base vs Finishing for this specific product
+  if (
+    opts.costCenters.base.length > 0 ||
+    opts.costCenters.finishing.length > 0
+  ) {
+    heading(doc, c, "Cost Center Classification");
+    para(
+      doc,
+      c,
+      "Production stages this tool bucketed into base cost vs finishing marginal cost for this product. Base markup applies to the first row, finishing markup to the second."
+    );
+    markupTable(
+      doc,
+      c,
+      ["Bucket", "Cost Centers (production stages)"],
+      [
+        [
+          "Base",
+          opts.costCenters.base.length > 0 ? opts.costCenters.base.join(", ") : "(none detected)",
+        ],
+        [
+          "Finishing",
+          opts.costCenters.finishing.length > 0
+            ? opts.costCenters.finishing.join(", ")
+            : "(none detected)",
+        ],
+      ]
+    );
+  }
 
   // Section 1 — BASE
   heading(doc, c, "1. BASE Product Markup");
