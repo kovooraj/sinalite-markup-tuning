@@ -41,13 +41,22 @@ export interface ScenariosOutput {
   matchedOrderRows: number;
   unmatchedOrderRows: number;
   unmatchedSamples: string[];
-  /** Dimensions used for matching — intersection of the two files. */
+  /** Dimensions used for matching — intersection of the two files, possibly
+   * trimmed by the progressive key-relaxation pass when the strict key
+   * produced zero matches. */
   commonDimensions: string[];
   /** Number of PE3 rows that collided on the same matching key. Non-zero
    * means the index averaged costs across multiple variants — surface to
    * the user so they know matches are approximate. */
   peCollisions: number;
   useStockInKey: boolean;
+  /** Dimensions the relaxation pass dropped (in the order they were dropped)
+   * because the strict key produced no matches. Empty when the full
+   * intersection matched cleanly. */
+  droppedDimensions: string[];
+  /** True if Stock was dropped from the matching key by the relaxation
+   * pass — it was set initially but produced 0 matches at first. */
+  droppedStock: boolean;
 }
 
 function classifyPct(p: number): keyof ScenarioResult["dist"] {
@@ -76,42 +85,138 @@ export function useStockInKey(
   return pe.hasStock && order.hasStock;
 }
 
+/** Try to match each order against the price engine, progressively relaxing
+ * the matching key until a non-trivial fraction of orders match. Returns the
+ * resolved (row, pe) pairs along with metadata describing which dimensions
+ * (and/or stock) were dropped to achieve the match. */
+function progressivelyMatch(
+  order: OrderReplayData,
+  pe: PriceEngineData
+): {
+  resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }>;
+  matched: number;
+  unmatched: number;
+  unmatchedSamples: string[];
+  commonDims: string[];
+  droppedDimensions: string[];
+  droppedStock: boolean;
+  collisions: number;
+} {
+  const initialDims = commonDimensions(pe, order);
+  const initialUseStock = useStockInKey(pe, order);
+  // Target match rate above which we accept the current key
+  const MIN_MATCH_RATE = 0.1;
+
+  // Attempt sequence: start strict, drop one dimension at a time, then drop
+  // stock if still 0 matches.
+  // Order of dropping: from highest-cardinality / least-likely-to-overlap.
+  // Heuristic: try the original "common" set first, then drop dims in reverse
+  // alphabetical order so deterministic (and longer-string dims tend to be
+  // more product-specific like "binding", "pages").
+  const dropOrder: { drop: string[]; stock: boolean }[] = [];
+  // Try the full key first
+  dropOrder.push({ drop: [], stock: initialUseStock });
+  // Then drop dims one at a time, accumulating
+  const dimsToTry = [...initialDims].sort();
+  for (let i = 1; i <= dimsToTry.length; i++) {
+    dropOrder.push({ drop: dimsToTry.slice(0, i), stock: initialUseStock });
+  }
+  // Finally try without stock (and without dims one at a time again)
+  if (initialUseStock) {
+    dropOrder.push({ drop: [], stock: false });
+    for (let i = 1; i <= dimsToTry.length; i++) {
+      dropOrder.push({ drop: dimsToTry.slice(0, i), stock: false });
+    }
+  }
+
+  let bestAttempt: {
+    matched: number;
+    unmatched: number;
+    unmatchedSamples: string[];
+    commonDims: string[];
+    droppedDimensions: string[];
+    droppedStock: boolean;
+    resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }>;
+    collisions: number;
+  } | null = null;
+
+  for (const attempt of dropOrder) {
+    const dimsForThisRun = dimsToTry.filter((d) => !attempt.drop.includes(d));
+    const { buckets, collisions } = indexPriceEngine(
+      pe,
+      dimsForThisRun,
+      attempt.stock
+    );
+    const resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }> =
+      [];
+    let matched = 0;
+    let unmatched = 0;
+    const unmatchedSamples: string[] = [];
+    for (const r of order.rows) {
+      const key = orderRowKey(r, dimsForThisRun, attempt.stock);
+      const peRow = pickByPriceProximity(buckets.get(key), r.avgPaid);
+      resolved.push({ row: r, pe: peRow });
+      if (peRow) matched += 1;
+      else {
+        unmatched += 1;
+        if (unmatchedSamples.length < 10) unmatchedSamples.push(r.description);
+      }
+    }
+    const matchRate = order.rows.length > 0 ? matched / order.rows.length : 0;
+    const candidate = {
+      matched,
+      unmatched,
+      unmatchedSamples,
+      commonDims: dimsForThisRun,
+      droppedDimensions: attempt.drop,
+      droppedStock: initialUseStock && !attempt.stock,
+      resolved,
+      collisions,
+    };
+    if (!bestAttempt || matched > bestAttempt.matched) {
+      bestAttempt = candidate;
+    }
+    // Accept as soon as we hit a decent match rate
+    if (matchRate >= MIN_MATCH_RATE) {
+      return candidate;
+    }
+  }
+  // Fall back to the best attempt even if it was below threshold
+  return (
+    bestAttempt ?? {
+      matched: 0,
+      unmatched: order.rows.length,
+      unmatchedSamples: order.rows.slice(0, 10).map((r) => r.description),
+      commonDims: initialDims,
+      droppedDimensions: [],
+      droppedStock: false,
+      resolved: order.rows.map((row) => ({ row, pe: null })),
+      collisions: 0,
+    }
+  );
+}
+
 export function computeAllScenarios(
   order: OrderReplayData,
   pe: PriceEngineData
 ): ScenariosOutput {
-  const common = commonDimensions(pe, order);
-  const useStock = useStockInKey(pe, order);
-  const { buckets, collisions } = indexPriceEngine(pe, common, useStock);
-
-  const resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }> = [];
-  let matched = 0;
-  let unmatched = 0;
-  const unmatchedSamples: string[] = [];
-  for (const r of order.rows) {
-    const key = orderRowKey(r, common, useStock);
-    const peRow = pickByPriceProximity(buckets.get(key), r.avgPaid);
-    resolved.push({ row: r, pe: peRow });
-    if (peRow) matched += 1;
-    else {
-      unmatched += 1;
-      if (unmatchedSamples.length < 10) unmatchedSamples.push(r.description);
-    }
-  }
+  const result = progressivelyMatch(order, pe);
 
   const results: ScenarioResult[] = [];
   for (const s of SCENARIOS) {
-    results.push(runScenario(s, resolved));
+    results.push(runScenario(s, result.resolved));
   }
 
   return {
     scenarios: results,
-    matchedOrderRows: matched,
-    unmatchedOrderRows: unmatched,
-    unmatchedSamples,
-    commonDimensions: common,
-    peCollisions: collisions,
-    useStockInKey: useStock,
+    matchedOrderRows: result.matched,
+    unmatchedOrderRows: result.unmatched,
+    unmatchedSamples: result.unmatchedSamples,
+    commonDimensions: result.commonDims,
+    peCollisions: result.collisions,
+    useStockInKey: !result.droppedStock && useStockInKey(pe, order),
+    droppedDimensions: result.droppedDimensions,
+    droppedStock: result.droppedStock,
   };
 }
 

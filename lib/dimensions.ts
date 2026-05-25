@@ -31,7 +31,7 @@ export const DIMENSIONS: readonly DimensionDef[] = [
   { key: "scoring", aliases: ["Scoring", "PE3 Scoring"] },
   { key: "cover", aliases: ["Cover", "PE3 Cover"] },
   { key: "binding", aliases: ["Binding", "PE3 Binding"] },
-  { key: "pages", aliases: ["Pages", "PE3 Pages", "Page Count"] },
+  { key: "pages", aliases: ["Pages", "PE3 Pages", "Page Count", "Total Pages"] },
   { key: "sides", aliases: ["Sides", "PE3 Sides"] },
   { key: "finishing", aliases: ["Finishing", "PE3 Finishing"] },
   { key: "lamination", aliases: ["Lamination", "PE3 Lamination"] },

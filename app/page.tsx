@@ -109,13 +109,35 @@ function computeSanity(
   }
   if (scenarios.peCollisions > 0) {
     warnings.push(
-      `Matching is approximate: ${scenarios.peCollisions} PE3 row${scenarios.peCollisions === 1 ? "" : "s"} collided on the same matching key (the order replay doesn't carry enough dimensional columns to differentiate them). Costs were averaged across the colliding variants.`
+      `Matching is approximate: ${scenarios.peCollisions} PE3 row${scenarios.peCollisions === 1 ? "" : "s"} collided on the same matching key. The price-proximity picker selected the variant whose current sale price best matched each order's actual paid price.`
     );
   }
   if (scenarios.commonDimensions.length === 0 && pe.dimensions.length > 0) {
     warnings.push(
       `Zero dimensional overlap between price engine (${pe.dimensions.join(", ")}) and order replay (${order.dimensions.join(", ") || "no detected dimensions"}). Matching uses size, qty, and turnaround only — consider adding ${pe.dimensions.join(" / ")} columns to the order replay for precise SKU-level analysis.`
     );
+  }
+  if (scenarios.droppedStock) {
+    warnings.push(
+      `Stock dropped from matching key — the price engine and order replay had different Stock values that didn't overlap (e.g. "100lb Gloss Printed 2 Sides" vs "100lb Gloss Text"). Matching now uses size, qty, turnaround, and remaining dimensions.`
+    );
+  }
+  if (scenarios.droppedDimensions.length > 0) {
+    warnings.push(
+      `Dimension${scenarios.droppedDimensions.length === 1 ? "" : "s"} dropped from matching key to find matches: ${scenarios.droppedDimensions.join(", ")}. Values likely don't share a vocabulary between the two files (e.g. "Long" vs "Long Edge / Portrait").`
+    );
+  }
+  if (totalOrders > 0 && scenarios.matchedOrderRows === 0) {
+    warnings.push(
+      `No order rows matched the price engine even after relaxing the matching key. Check that the two files describe the same product family — the price-engine sheet name is "${pe.productName}", and the order replay's first row mentions "${order.rows[0]?.description ?? "—"}".`
+    );
+  } else if (totalOrders > 0) {
+    const rate = scenarios.matchedOrderRows / totalOrders;
+    if (rate < 0.5) {
+      warnings.push(
+        `Low match rate: only ${scenarios.matchedOrderRows} of ${totalOrders} orders (${(rate * 100).toFixed(0)}%) matched the price engine. Scenario deltas reflect only the matched orders.`
+      );
+    }
   }
   if (a && a.dist.noChange < 0.3) {
     warnings.push(
@@ -164,11 +186,15 @@ export default function Home() {
         throw err;
       }
       const scenarios = computeAllScenarios(order, pe);
-      if (scenarios.matchedOrderRows === 0) {
+      // Don't hard-block on zero matches — instead surface a strong warning
+      // alongside the (empty) results so the user can still see what was
+      // tried and download diagnostics. Only block if the order replay was
+      // unparseable (no rows at all).
+      if (order.rows.length === 0) {
         setOrderErr(
-          "Zero SKU rows from the order replay matched the price engine. Likely a different product or coating."
+          "Order replay parsed but contained no usable rows. Check the file's Per-SKU Detail / Matched Orders / All Orders sheet."
         );
-        throw new Error("zero matches");
+        throw new Error("no rows");
       }
       const selfCheck = runSelfCheck(order, pe);
       const recommendation = recommend(scenarios.scenarios, {
