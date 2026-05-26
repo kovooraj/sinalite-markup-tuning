@@ -8,6 +8,10 @@ export interface BuildRepricedOpts {
   pe: PriceEngineData;
   scenarioId: string;
   usdRate: number;
+  /** When true (default) the cap rule applies: new price never exceeds the
+   * PE3 list price. When false the new price floats free and delta vs list
+   * can go positive. */
+  applyCapRule?: boolean;
 }
 
 const FMT_CURRENCY = '"$"#,##0.00;("$"#,##0.00);"-"';
@@ -119,12 +123,13 @@ export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> 
         baseCost: r.baseCost,
         finCost: r.finCost,
         isRush,
-        currentSalePrice: 0,
+        currentSalePrice: r.currentSalePrice,
       },
-      scenario.grad
+      scenario.grad,
+      opts.applyCapRule ?? true
     );
     const subtotalPreNbd = res.basePrice + res.finPrice;
-    const newCad = res.uncappedPrice;
+    const newCad = res.finalPrice;
     const newUsd = newCad * opts.usdRate;
     const delta = newCad - r.currentSalePrice;
     const rowData: Record<string, string | number> = {

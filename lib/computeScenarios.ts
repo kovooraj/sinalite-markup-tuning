@@ -295,13 +295,15 @@ function progressivelyMatch(
 
 export function computeAllScenarios(
   order: OrderReplayData,
-  pe: PriceEngineData
+  pe: PriceEngineData,
+  opts: { applyCapRule?: boolean } = {}
 ): ScenariosOutput {
+  const applyCapRule = opts.applyCapRule ?? true;
   const result = progressivelyMatch(order, pe);
 
   const results: ScenarioResult[] = [];
   for (const s of SCENARIOS) {
-    results.push(runScenario(s, result.resolved));
+    results.push(runScenario(s, result.resolved, applyCapRule));
   }
 
   return {
@@ -322,7 +324,8 @@ export function computeAllScenarios(
 
 function runScenario(
   s: ScenarioDef,
-  resolved: ResolvedRow[]
+  resolved: ResolvedRow[],
+  applyCapRule: boolean
 ): ScenarioResult {
   // Delta everywhere is now computed as (New Price capped) − PE3 List Price.
   // This is the catalog-repricing view: capped rows produce $0 delta (new = list),
@@ -356,7 +359,8 @@ function runScenario(
         isRush: row.turnaround === "Rush (NBD)",
         currentSalePrice: pe.currentSalePrice,
       },
-      s.grad
+      s.grad,
+      applyCapRule
     );
     const newRev = r.finalPrice * row.orders;
     const paidRev = row.avgPaid * row.orders;

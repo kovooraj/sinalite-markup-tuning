@@ -11,6 +11,7 @@ export interface BuildScenariosOpts {
   recommendation: Recommendation;
   targetMinPct: number;
   targetMaxPct: number;
+  applyCapRule?: boolean;
 }
 
 const CURRENCY_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)';
@@ -44,9 +45,10 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
   titleCell.alignment = { vertical: "middle" };
 
   // R2: Subtitle
+  const capLabel = (opts.applyCapRule ?? true) ? "Cap rule: APPLIED" : "Cap rule: DISABLED";
   ws.mergeCells("A2:H2");
   ws.getCell("A2").value =
-    "Δ = New Price (capped) − PE3 List Price, summed over 3 months. Capped rows produce $0 delta; uncapped produce negative delta.";
+    `${capLabel} · Δ = New Price ${(opts.applyCapRule ?? true) ? "(capped)" : "(uncapped)"} − PE3 List Price, summed over 3 months.`;
   ws.getCell("A2").font = { italic: true, color: { argb: "FF555555" } };
 
   // R4: Scenario header — delta is now "New Price (capped) − PE3 List Price"

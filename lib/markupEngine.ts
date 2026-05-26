@@ -131,7 +131,8 @@ export interface PriceComputeResult {
 
 export function computeNewPrice(
   inp: PriceComputeInput,
-  grad: Gradient
+  grad: Gradient,
+  applyCap = true
 ): PriceComputeResult {
   const band = bandOf(inp.qty);
   const basePrice = inp.baseCost * (1 + grad.base[band]);
@@ -142,8 +143,11 @@ export function computeNewPrice(
     subtotal = subtotal * (1 + grad.nbd[nb]);
   }
   const uncapped = subtotal;
+  // Cap rule: only applied when applyCap is true AND a positive list price
+  // is available. When disabled, the new price floats free of the catalog
+  // list and may exceed it (delta can go positive).
   const finalPrice =
-    inp.currentSalePrice > 0 && uncapped > inp.currentSalePrice
+    applyCap && inp.currentSalePrice > 0 && uncapped > inp.currentSalePrice
       ? inp.currentSalePrice
       : uncapped;
   return {

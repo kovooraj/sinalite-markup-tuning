@@ -12,6 +12,9 @@ export interface BuildAnnotatedOrdersOpts {
   scenarioId: string;
   usdRate: number;
   productSlug: string;
+  /** When false the cap rule is NOT applied — final price floats free of
+   * the PE3 list price and delta vs list can go positive. Defaults to true. */
+  applyCapRule?: boolean;
 }
 
 const FMT_CURRENCY = '"$"#,##0.00;("$"#,##0.00);"-"';
@@ -70,11 +73,11 @@ export async function buildAnnotatedOrdersXlsx(
   const scenario: ScenarioDef | undefined = SCENARIO_BY_ID[opts.scenarioId];
   if (!scenario) throw new Error(`Unknown scenario: ${opts.scenarioId}`);
 
+  const applyCapRule = opts.applyCapRule ?? true;
   // Use the same matching pass the live UI uses — gets us the resolved
   // tuples with match quality (exact / snapped-qty / no-match) and the
-  // closest-qty fallback applied. We only need this scenario's results,
-  // but the matching is scenario-agnostic so we discard the rest.
-  const scResult = computeAllScenarios(opts.order, opts.pe);
+  // closest-qty fallback applied.
+  const scResult = computeAllScenarios(opts.order, opts.pe, { applyCapRule });
   const resolved = scResult.resolved;
 
   const wb = new ExcelJS.Workbook();
@@ -176,13 +179,7 @@ export async function buildAnnotatedOrdersXlsx(
     {
       header: "Total Δ vs PE3 List (CAD)",
       key: "totalDelta",
-      width: 18,
-      fmt: FMT_CURRENCY,
-    },
-    {
-      header: "Annualized Δ vs PE3 List",
-      key: "annualizedDelta",
-      width: 18,
+      width: 20,
       fmt: FMT_CURRENCY,
     }
   );
@@ -240,7 +237,6 @@ export async function buildAnnotatedOrdersXlsx(
         newUsd: 0,
         deltaPerOrder: 0,
         totalDelta: 0,
-        annualizedDelta: 0,
       });
       unmatchedRowCount += 1;
       continue;
@@ -259,14 +255,15 @@ export async function buildAnnotatedOrdersXlsx(
         isRush,
         currentSalePrice: pe.currentSalePrice,
       },
-      scenario.grad
+      scenario.grad,
+      applyCapRule
     );
     const subtotalPreNbd = res.basePrice + res.finPrice;
     // Delta is the catalog-repricing measure: New Price (capped) − PE3 List Price.
-    // Capped orders → delta = 0. Uncapped → delta = newPrice − listPrice (≤ 0).
+    // When cap rule applied: capped orders → delta = 0; uncapped → delta ≤ 0.
+    // When cap rule disabled: delta can go positive.
     const deltaPerOrder = res.finalPrice - pe.currentSalePrice;
     const totalDelta = deltaPerOrder * r.orders;
-    const annualized = totalDelta * 4;
 
     aggregateDelta += totalDelta;
     aggregatePaid += r.avgPaid * r.orders;
@@ -297,7 +294,6 @@ export async function buildAnnotatedOrdersXlsx(
       newUsd: round(res.finalPrice * opts.usdRate, 2),
       deltaPerOrder: round(deltaPerOrder, 2),
       totalDelta: round(totalDelta, 2),
-      annualizedDelta: round(annualized, 2),
     });
   }
 
@@ -313,13 +309,13 @@ export async function buildAnnotatedOrdersXlsx(
       const colNum = ws.getColumn(c.key).number;
       row.getCell(colNum).numFmt = c.fmt;
     }
-    row.getCell(ws.getColumn("newCad").number).fill = HIGHLIGHT_FILL;
-    row.getCell(ws.getColumn("annualizedDelta").number).fill = HIGHLIGHT_FILL;
+    row.getCell(ws.getColumn("totalDelta").number).fill = HIGHLIGHT_FILL;
   }
 
   // TOTAL row
+  const annualizedSum = aggregateDelta * 4;
   const totalRow: Record<string, string | number> = {
-    description: `TOTAL (${matchedRowCount} matched · ${unmatchedRowCount} unmatched)`,
+    description: `TOTAL (${matchedRowCount} matched · ${unmatchedRowCount} unmatched) · Annualized × 4 = $${annualizedSum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     qty: "",
     stock: "",
     size: "",
@@ -342,7 +338,6 @@ export async function buildAnnotatedOrdersXlsx(
     newUsd: round(aggregateNew * opts.usdRate, 2),
     deltaPerOrder: 0,
     totalDelta: round(aggregateDelta, 2),
-    annualizedDelta: round(aggregateDelta * 4, 2),
   };
   for (const dim of allDims) totalRow[`dim_${dim}`] = "";
   for (const idCol of opts.order.identifierColumns)
@@ -364,7 +359,8 @@ export async function buildAnnotatedOrdersXlsx(
   ws.getRow(1).height = 18;
   ws.mergeCells(1, 1, 1, cols.length);
   const titleCell = ws.getCell(1, 1);
-  titleCell.value = `Scenario ${opts.scenarioId} · Base ${scenario.baseFormatted} · Finishing ${scenario.finFormatted} · NBD ${scenario.nbdFormatted}  ||  Δ vs PE3 List = New Price (capped) − PE3 List Price · Annualized = sum(Total Δ) × 4`;
+  const capLabel = applyCapRule ? "Cap rule: APPLIED" : "Cap rule: DISABLED";
+  titleCell.value = `Scenario ${opts.scenarioId} · Base ${scenario.baseFormatted} · Finishing ${scenario.finFormatted} · NBD ${scenario.nbdFormatted}  ||  ${capLabel} · Δ vs PE3 List = New Price ${applyCapRule ? "(capped)" : "(uncapped)"} − PE3 List Price · Annualized = sum(Total Δ) × 4`;
   titleCell.font = { name: "Arial", italic: true, color: { argb: "FF555555" }, size: 10 };
   titleCell.alignment = { vertical: "middle" };
 

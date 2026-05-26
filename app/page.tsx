@@ -160,6 +160,7 @@ export default function Home() {
     targetMinPct: -0.01,
     targetMaxPct: 0.005,
     usdRate: 0.7,
+    applyCapRule: true,
   });
 
   const canGenerate = !!priceFile && !!orderFile && !generating;
@@ -185,7 +186,9 @@ export default function Home() {
         setOrderErr((err as Error).message);
         throw err;
       }
-      const scenarios = computeAllScenarios(order, pe);
+      const scenarios = computeAllScenarios(order, pe, {
+        applyCapRule: meta.applyCapRule,
+      });
       // Don't hard-block on zero matches — instead surface a strong warning
       // alongside the (empty) results so the user can still see what was
       // tried and download diagnostics. Only block if the order replay was
@@ -241,6 +244,7 @@ export default function Home() {
         recommendation: computed.recommendation,
         targetMinPct: meta.targetMinPct,
         targetMaxPct: meta.targetMaxPct,
+        applyCapRule: meta.applyCapRule,
       });
     } finally {
       setGenerating(false);
@@ -255,6 +259,7 @@ export default function Home() {
         pe: computed.pe,
         scenarioId,
         usdRate: meta.usdRate || 0.7,
+        applyCapRule: meta.applyCapRule,
       });
     } finally {
       setGenerating(false);
@@ -271,6 +276,7 @@ export default function Home() {
         scenarioId,
         usdRate: meta.usdRate || 0.7,
         productSlug: computed.pe.productSlug,
+        applyCapRule: meta.applyCapRule,
       });
     } finally {
       setGenerating(false);

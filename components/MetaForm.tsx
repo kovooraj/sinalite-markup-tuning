@@ -8,6 +8,7 @@ export interface MetaFormValues {
   targetMinPct: number;
   targetMaxPct: number;
   usdRate: number;
+  applyCapRule: boolean;
 }
 
 interface Props {
@@ -26,6 +27,8 @@ const TIPS = {
     "Upper bound of the acceptable revenue-impact band (typically +0.5%). Scenarios within [min, max] are tagged “In band”, and the one with the smallest customer-impact drift vs Scenario A gets the “★ Recommended” star. Output files are unchanged.",
   usdRate:
     "CAD → USD multiplier used in every Repriced Catalog download. New Price USD = New Price CAD × this rate. Default 0.70. The column header in each xlsx echoes the rate (e.g. “New Price USD (@0.70)”).",
+  applyCapRule:
+    "When checked (default), every new price is capped at the PE3 list price — final = MIN(model price, list price). Capped rows produce $0 delta vs list. Uncheck to see the uncapped model price even when it would exceed list — delta can then go positive. Affects all three downloads: Scenarios xlsx, Repriced Catalog, and Annotated Orders.",
 };
 
 export function MetaForm({ values, onChange }: Props) {
@@ -85,7 +88,7 @@ export function MetaForm({ values, onChange }: Props) {
           className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
         />
       </label>
-      <label className="text-sm md:col-span-2">
+      <label className="text-sm">
         <div className="mb-1 flex items-center text-xs font-semibold text-zinc-700">
           <span>USD rate (CAD × rate)</span>
           <InfoIcon text={TIPS.usdRate} />
@@ -98,6 +101,18 @@ export function MetaForm({ values, onChange }: Props) {
           onChange={(e) => set("usdRate", Number(e.target.value))}
           className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
         />
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={values.applyCapRule}
+          onChange={(e) => set("applyCapRule", e.target.checked)}
+          className="h-4 w-4 rounded border-zinc-400 accent-blue-600"
+        />
+        <span className="flex items-center text-xs font-semibold text-zinc-700">
+          <span>Apply cap rule</span>
+          <InfoIcon text={TIPS.applyCapRule} />
+        </span>
       </label>
     </div>
   );
