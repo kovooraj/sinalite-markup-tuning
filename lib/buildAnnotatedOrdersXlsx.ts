@@ -122,13 +122,18 @@ export async function buildAnnotatedOrdersXlsx(
   }
   cols.push(
     { header: "Orders", key: "orders", width: 8, fmt: FMT_INT },
-    { header: "Avg Paid CAD", key: "avgPaid", width: 12, fmt: FMT_CURRENCY },
+    {
+      header: "Actual Paid (CAD)",
+      key: "avgPaid",
+      width: 14,
+      fmt: FMT_CURRENCY,
+    },
     { header: "PE3 Base Cost", key: "baseCost", width: 13, fmt: FMT_CURRENCY },
     { header: "PE3 Fin Cost", key: "finCost", width: 12, fmt: FMT_CURRENCY },
     {
-      header: "Current Sale Price",
+      header: "PE3 List Price",
       key: "currentSalePrice",
-      width: 16,
+      width: 14,
       fmt: FMT_CURRENCY,
     },
     { header: "Base Mkup %", key: "baseMkup", width: 11, fmt: FMT_PCT },
@@ -163,21 +168,21 @@ export async function buildAnnotatedOrdersXlsx(
     { header: "New Price CAD", key: "newCad", width: 14, fmt: FMT_CURRENCY },
     { header: usdHeader, key: "newUsd", width: 18, fmt: FMT_CURRENCY },
     {
-      header: "Delta per Order",
+      header: "Δ vs PE3 List (per order)",
       key: "deltaPerOrder",
-      width: 14,
+      width: 18,
       fmt: FMT_CURRENCY,
     },
     {
-      header: "Total Delta (CAD)",
+      header: "Total Δ vs PE3 List (CAD)",
       key: "totalDelta",
-      width: 16,
+      width: 18,
       fmt: FMT_CURRENCY,
     },
     {
-      header: "Annualized Delta",
+      header: "Annualized Δ vs PE3 List",
       key: "annualizedDelta",
-      width: 16,
+      width: 18,
       fmt: FMT_CURRENCY,
     }
   );
@@ -193,7 +198,8 @@ export async function buildAnnotatedOrdersXlsx(
   headerRow.height = 30;
 
   let aggregateDelta = 0;
-  let aggregatePaid = 0;
+  let aggregatePaid = 0; // sum of avgPaid × orders (context, not the delta baseline)
+  let aggregateList = 0; // sum of PE3 list × orders (delta baseline)
   let aggregateNew = 0;
   let matchedRowCount = 0;
   let unmatchedRowCount = 0;
@@ -256,12 +262,15 @@ export async function buildAnnotatedOrdersXlsx(
       scenario.grad
     );
     const subtotalPreNbd = res.basePrice + res.finPrice;
-    const deltaPerOrder = res.finalPrice - r.avgPaid;
+    // Delta is the catalog-repricing measure: New Price (capped) − PE3 List Price.
+    // Capped orders → delta = 0. Uncapped → delta = newPrice − listPrice (≤ 0).
+    const deltaPerOrder = res.finalPrice - pe.currentSalePrice;
     const totalDelta = deltaPerOrder * r.orders;
     const annualized = totalDelta * 4;
 
     aggregateDelta += totalDelta;
     aggregatePaid += r.avgPaid * r.orders;
+    aggregateList += pe.currentSalePrice * r.orders;
     aggregateNew += res.finalPrice * r.orders;
     matchedRowCount += 1;
 
@@ -316,10 +325,10 @@ export async function buildAnnotatedOrdersXlsx(
     size: "",
     turnaround: "",
     orders: opts.order.totals.orders,
-    avgPaid: round(aggregatePaid / Math.max(opts.order.totals.orders, 1), 2),
+    avgPaid: round(aggregatePaid, 2), // sum of what customers actually paid
     baseCost: 0,
     finCost: 0,
-    currentSalePrice: round(aggregatePaid, 2),
+    currentSalePrice: round(aggregateList, 2), // sum of PE3 list prices = delta baseline
     baseMkup: 0,
     finMkup: 0,
     nbdMkup: 0,
@@ -355,7 +364,7 @@ export async function buildAnnotatedOrdersXlsx(
   ws.getRow(1).height = 18;
   ws.mergeCells(1, 1, 1, cols.length);
   const titleCell = ws.getCell(1, 1);
-  titleCell.value = `Scenario ${opts.scenarioId} · Base ${scenario.baseFormatted} · Finishing ${scenario.finFormatted} · NBD ${scenario.nbdFormatted} · Annualized Delta = sum(Total Delta) × 4`;
+  titleCell.value = `Scenario ${opts.scenarioId} · Base ${scenario.baseFormatted} · Finishing ${scenario.finFormatted} · NBD ${scenario.nbdFormatted}  ||  Δ vs PE3 List = New Price (capped) − PE3 List Price · Annualized = sum(Total Δ) × 4`;
   titleCell.font = { name: "Arial", italic: true, color: { argb: "FF555555" }, size: 10 };
   titleCell.alignment = { vertical: "middle" };
 

@@ -324,8 +324,13 @@ function runScenario(
   s: ScenarioDef,
   resolved: ResolvedRow[]
 ): ScenarioResult {
+  // Delta everywhere is now computed as (New Price capped) − PE3 List Price.
+  // This is the catalog-repricing view: capped rows produce $0 delta (new = list),
+  // uncapped rows produce a negative delta (new < list). The previous
+  // realized-revenue framing (vs avgPaid) has been replaced everywhere.
   let totalDelta = 0;
-  let totalPaid = 0;
+  let totalList = 0; // baseline = sum of PE3 list × orders
+  let totalPaid = 0; // kept for context / paid-by-turnaround stats
   let totalNewRev = 0;
   let totalOrders = 0;
   const deltaByBand: [number, number, number, number] = [0, 0, 0, 0];
@@ -355,10 +360,12 @@ function runScenario(
     );
     const newRev = r.finalPrice * row.orders;
     const paidRev = row.avgPaid * row.orders;
-    const delta = newRev - paidRev;
+    const listRev = pe.currentSalePrice * row.orders;
+    const delta = newRev - listRev; // catalog-repricing baseline
     totalDelta += delta;
     totalNewRev += newRev;
     totalPaid += paidRev;
+    totalList += listRev;
     totalOrders += row.orders;
     deltaByBand[bandOf(row.qty)] += delta;
     if (row.turnaround === "Rush (NBD)") {
@@ -372,15 +379,15 @@ function runScenario(
       paidByTurnaround.standard += paidRev;
       newRevByTurnaround.standard += newRev;
     }
-    if (row.avgPaid > 0) {
-      const pct = (r.finalPrice - row.avgPaid) / row.avgPaid;
+    if (pe.currentSalePrice > 0) {
+      const pct = (r.finalPrice - pe.currentSalePrice) / pe.currentSalePrice;
       dist[classifyPct(pct)] += row.orders;
     } else {
       dist.noChange += row.orders;
     }
   }
 
-  const pctDelta = totalPaid > 0 ? totalDelta / totalPaid : 0;
+  const pctDelta = totalList > 0 ? totalDelta / totalList : 0;
   const distFractions = {
     noChange: totalOrders > 0 ? dist.noChange / totalOrders : 0,
     decrease1to5: totalOrders > 0 ? dist.decrease1to5 / totalOrders : 0,

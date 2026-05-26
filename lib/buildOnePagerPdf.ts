@@ -330,10 +330,10 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   const rec = opts.recommendation;
   const recRow = rec.recommended;
   const targetBandStr = `[${(opts.targetMinPct * 100).toFixed(1)}%, ${(opts.targetMaxPct * 100).toFixed(1)}%]`;
-  para(doc, c, `Target band: ${targetBandStr}. ${rec.inBand.length} of 8 scenarios fall inside this band.`);
+  para(doc, c, `Target band: ${targetBandStr}. ${rec.inBand.length} of 8 scenarios fall inside this band. Δ = New Price (capped) − PE3 List Price.`);
   if (recRow) {
     para(doc, c,
-      `Recommended: ${recRow.id} — Δ ${fmtUsd(recRow.deltaUsd, { signed: true })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${fmtUsd(recRow.annualizedUsd, { signed: true })}.`,
+      `Recommended: ${recRow.id} — Δ vs PE3 List ${fmtUsd(recRow.deltaUsd, { signed: true })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${fmtUsd(recRow.annualizedUsd, { signed: true })}.`,
       { bold: true, size: 9.5 }
     );
   }
@@ -373,7 +373,7 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
     const recIdx = altScenarios.findIndex((s) => s.id === recRow?.id);
     autoTable(doc, {
       startY: c.y,
-      head: [["Scenario", "Base", "Finishing", "NBD", "3-mo Delta", "% Delta", "Status"]],
+      head: [["Scenario", "Base", "Finishing", "NBD", "3-mo Δ vs List", "% Δ", "Status"]],
       body: cleanRows(altBody),
       margin: { left: MARGIN, right: MARGIN },
       styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2, lineColor: [180, 180, 180], lineWidth: 0.3, overflow: "linebreak" },

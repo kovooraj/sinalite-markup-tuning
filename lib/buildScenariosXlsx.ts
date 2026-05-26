@@ -46,17 +46,17 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
   // R2: Subtitle
   ws.mergeCells("A2:H2");
   ws.getCell("A2").value =
-    "Goal: find markup combinations that are revenue-neutral or positive while keeping customer impact contained.";
+    "Δ = New Price (capped) − PE3 List Price, summed over 3 months. Capped rows produce $0 delta; uncapped produce negative delta.";
   ws.getCell("A2").font = { italic: true, color: { argb: "FF555555" } };
 
-  // R4: Scenario header
+  // R4: Scenario header — delta is now "New Price (capped) − PE3 List Price"
   const header1 = [
     "Scenario",
     "Description",
     "Base Markup",
     "Finishing Markup",
     "NBD Markup",
-    "3-mo Δ",
+    "3-mo Δ vs PE3 List",
     "% Δ",
     "Annualized",
   ];

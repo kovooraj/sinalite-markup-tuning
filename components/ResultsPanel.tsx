@@ -105,9 +105,9 @@ export function ResultsPanel(props: Props) {
               <th className="border border-zinc-200 px-2 py-1">Base</th>
               <th className="border border-zinc-200 px-2 py-1">Finishing</th>
               <th className="border border-zinc-200 px-2 py-1">NBD</th>
-              <th className="border border-zinc-200 px-2 py-1 text-right">3-mo Δ</th>
-              <th className="border border-zinc-200 px-2 py-1 text-right">% Δ</th>
-              <th className="border border-zinc-200 px-2 py-1 text-right">Annualized</th>
+              <th className="border border-zinc-200 px-2 py-1 text-right" title="New Price (capped) − PE3 List Price, summed over 3 months">3-mo Δ vs PE3 List</th>
+              <th className="border border-zinc-200 px-2 py-1 text-right" title="3-mo Δ ÷ sum of PE3 list × orders">% Δ</th>
+              <th className="border border-zinc-200 px-2 py-1 text-right" title="3-mo Δ × 4">Annualized</th>
               <th className="border border-zinc-200 px-2 py-1">Status</th>
               <th className="border border-zinc-200 px-2 py-1">Repriced Catalog</th>
               <th className="border border-zinc-200 px-2 py-1">Annotated Orders</th>
