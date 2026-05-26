@@ -5,6 +5,9 @@ import {
   PriceEngineRow,
   indexPriceEngine,
   pickByPriceProximity,
+  indexPriceEngineNoQty,
+  orderRowKeyNoQty,
+  pickByClosestQty,
 } from "./parsePriceEngine";
 import { bandOf } from "./qtyBands";
 
@@ -57,6 +60,13 @@ export interface ScenariosOutput {
   /** True if Stock was dropped from the matching key by the relaxation
    * pass — it was set initially but produced 0 matches at first. */
   droppedStock: boolean;
+  /** Count of order rows resolved by exact key match. */
+  matchedExact: number;
+  /** Count of order rows resolved by closest-qty fallback. */
+  matchedSnapped: number;
+  /** Per-row resolved tuples — used by the Annotated Orders writer to
+   * surface match quality per row. */
+  resolved: ResolvedRow[];
 }
 
 function classifyPct(p: number): keyof ScenarioResult["dist"] {
@@ -85,16 +95,31 @@ export function useStockInKey(
   return pe.hasStock && order.hasStock;
 }
 
+/** Match quality for a single resolved order row. */
+export type MatchQuality = "exact" | "snapped-qty" | "no-match";
+
+export interface ResolvedRow {
+  row: OrderReplayRow;
+  pe: PriceEngineRow | null;
+  matchQuality: MatchQuality;
+  /** When matchQuality === "snapped-qty", the PE3 qty we snapped to. */
+  snappedFromQty: number | null;
+}
+
 /** Try to match each order against the price engine, progressively relaxing
- * the matching key until a non-trivial fraction of orders match. Returns the
- * resolved (row, pe) pairs along with metadata describing which dimensions
- * (and/or stock) were dropped to achieve the match. */
+ * the matching key until a non-trivial fraction of orders match. After the
+ * key is chosen, any remaining unmatched rows fall back to closest-qty
+ * lookup (same stock/size/turnaround/dims, nearest qty). Returns the
+ * resolved tuples along with metadata describing which dimensions (and/or
+ * stock) were dropped. */
 function progressivelyMatch(
   order: OrderReplayData,
   pe: PriceEngineData
 ): {
-  resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }>;
+  resolved: ResolvedRow[];
   matched: number;
+  matchedExact: number;
+  matchedSnapped: number;
   unmatched: number;
   unmatchedSamples: string[];
   commonDims: string[];
@@ -138,6 +163,7 @@ function progressivelyMatch(
     droppedStock: boolean;
     resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }>;
     collisions: number;
+    useStock: boolean;
   } | null = null;
 
   for (const attempt of dropOrder) {
@@ -172,17 +198,17 @@ function progressivelyMatch(
       droppedStock: initialUseStock && !attempt.stock,
       resolved,
       collisions,
+      useStock: attempt.stock,
     };
     if (!bestAttempt || matched > bestAttempt.matched) {
       bestAttempt = candidate;
     }
-    // Accept as soon as we hit a decent match rate
     if (matchRate >= MIN_MATCH_RATE) {
-      return candidate;
+      bestAttempt = candidate;
+      break;
     }
   }
-  // Fall back to the best attempt even if it was below threshold
-  return (
+  const chosen =
     bestAttempt ?? {
       matched: 0,
       unmatched: order.rows.length,
@@ -192,8 +218,79 @@ function progressivelyMatch(
       droppedStock: false,
       resolved: order.rows.map((row) => ({ row, pe: null })),
       collisions: 0,
-    }
+      useStock: initialUseStock,
+    };
+
+  // Closest-qty fallback: for rows that still didn't match, look up the
+  // PE3 catalog by everything-except-qty and snap to the nearest qty in
+  // the same stock/size/turnaround/dims bucket. The PE3 catalog typically
+  // has standard breaks (50/100/250/500/1000/2500/...); orders at custom
+  // qtys (200, 600, 1500, 3500...) need this fallback to get a sensible
+  // cost basis rather than being dropped.
+  const noQtyBuckets = indexPriceEngineNoQty(
+    pe,
+    chosen.commonDims,
+    chosen.useStock
   );
+  const finalResolved: ResolvedRow[] = [];
+  let matchedExact = 0;
+  let matchedSnapped = 0;
+  let stillUnmatched = 0;
+  const stillUnmatchedSamples: string[] = [];
+
+  for (const { row, pe: exact } of chosen.resolved) {
+    if (exact) {
+      finalResolved.push({
+        row,
+        pe: exact,
+        matchQuality: "exact",
+        snappedFromQty: null,
+      });
+      matchedExact += 1;
+      continue;
+    }
+    const candidates = noQtyBuckets.get(
+      orderRowKeyNoQty(row, chosen.commonDims, chosen.useStock)
+    );
+    const { pe: snapped, snappedFromQty } = pickByClosestQty(
+      candidates,
+      row.qty,
+      row.avgPaid
+    );
+    if (snapped) {
+      finalResolved.push({
+        row,
+        pe: snapped,
+        matchQuality: "snapped-qty",
+        snappedFromQty,
+      });
+      matchedSnapped += 1;
+    } else {
+      finalResolved.push({
+        row,
+        pe: null,
+        matchQuality: "no-match",
+        snappedFromQty: null,
+      });
+      stillUnmatched += 1;
+      if (stillUnmatchedSamples.length < 10)
+        stillUnmatchedSamples.push(row.description);
+    }
+  }
+
+  return {
+    resolved: finalResolved,
+    matched: matchedExact + matchedSnapped,
+    matchedExact,
+    matchedSnapped,
+    unmatched: stillUnmatched,
+    unmatchedSamples:
+      stillUnmatched > 0 ? stillUnmatchedSamples : chosen.unmatchedSamples,
+    commonDims: chosen.commonDims,
+    droppedDimensions: chosen.droppedDimensions,
+    droppedStock: chosen.droppedStock,
+    collisions: chosen.collisions,
+  };
 }
 
 export function computeAllScenarios(
@@ -217,12 +314,15 @@ export function computeAllScenarios(
     useStockInKey: !result.droppedStock && useStockInKey(pe, order),
     droppedDimensions: result.droppedDimensions,
     droppedStock: result.droppedStock,
+    matchedExact: result.matchedExact,
+    matchedSnapped: result.matchedSnapped,
+    resolved: result.resolved,
   };
 }
 
 function runScenario(
   s: ScenarioDef,
-  resolved: Array<{ row: OrderReplayRow; pe: PriceEngineRow | null }>
+  resolved: ResolvedRow[]
 ): ScenarioResult {
   let totalDelta = 0;
   let totalPaid = 0;

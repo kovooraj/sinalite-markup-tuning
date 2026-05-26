@@ -334,6 +334,85 @@ export function indexPriceEngine(
   return { buckets, collisions };
 }
 
+/** Build a no-qty index keyed by (stock|size|turnaround|...dims). Used by
+ * the closest-qty fallback when an order's exact qty isn't in the PE3
+ * catalog. */
+export function indexPriceEngineNoQty(
+  pe: PriceEngineData,
+  includedDims: string[],
+  useStock = true
+): Map<string, PriceEngineRow[]> {
+  const buckets = new Map<string, PriceEngineRow[]>();
+  for (const r of pe.rows) {
+    const key = buildKey(
+      {
+        stock: useStock ? r.stock : "",
+        size: r.size,
+        qty: 0, // strip qty
+        turnaround: r.turnaround,
+      },
+      r.dims,
+      includedDims
+    );
+    let arr = buckets.get(key);
+    if (!arr) {
+      arr = [];
+      buckets.set(key, arr);
+    }
+    arr.push(r);
+  }
+  return buckets;
+}
+
+/** Build a no-qty key for an order row using the same convention as the
+ * no-qty index. */
+export function orderRowKeyNoQty(
+  row: { stock: string; size: string; turnaround: string; dims: RowDimensions },
+  includedDims: string[],
+  useStock = true
+): string {
+  return buildKey(
+    {
+      stock: useStock ? row.stock : "",
+      size: row.size,
+      qty: 0,
+      turnaround: row.turnaround,
+    },
+    row.dims,
+    includedDims
+  );
+}
+
+/** Pick the PE3 row whose qty is closest to the target order qty. Used as
+ * the closest-qty fallback. */
+export function pickByClosestQty(
+  candidates: PriceEngineRow[] | undefined,
+  targetQty: number,
+  paidPrice: number
+): { pe: PriceEngineRow | null; snappedFromQty: number | null } {
+  if (!candidates || candidates.length === 0)
+    return { pe: null, snappedFromQty: null };
+  let best = candidates[0];
+  let bestDiff = Math.abs(best.qty - targetQty);
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i];
+    const d = Math.abs(c.qty - targetQty);
+    if (d < bestDiff) {
+      best = c;
+      bestDiff = d;
+    } else if (d === bestDiff && paidPrice > 0) {
+      // tie-break by price proximity
+      if (
+        Math.abs(c.currentSalePrice - paidPrice) <
+        Math.abs(best.currentSalePrice - paidPrice)
+      ) {
+        best = c;
+      }
+    }
+  }
+  return { pe: best, snappedFromQty: best.qty };
+}
+
 /** Pick the PE3 row that best matches an order based on price proximity.
  * Among all PE3 rows matching the order's key, choose the one whose
  * currentSalePrice is closest to what the customer actually paid. This

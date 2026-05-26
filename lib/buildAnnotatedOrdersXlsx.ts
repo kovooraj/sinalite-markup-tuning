@@ -1,12 +1,8 @@
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
-import { OrderReplayData, orderRowKey } from "./parseOrderReplay";
-import {
-  PriceEngineData,
-  indexPriceEngine,
-  pickByPriceProximity,
-} from "./parsePriceEngine";
-import { commonDimensions, useStockInKey } from "./computeScenarios";
+import { OrderReplayData } from "./parseOrderReplay";
+import { PriceEngineData } from "./parsePriceEngine";
+import { computeAllScenarios } from "./computeScenarios";
 import { computeNewPrice, SCENARIO_BY_ID, ScenarioDef } from "./markupEngine";
 import { bandOf, nbdBandOf } from "./qtyBands";
 
@@ -74,9 +70,12 @@ export async function buildAnnotatedOrdersXlsx(
   const scenario: ScenarioDef | undefined = SCENARIO_BY_ID[opts.scenarioId];
   if (!scenario) throw new Error(`Unknown scenario: ${opts.scenarioId}`);
 
-  const common = commonDimensions(opts.pe, opts.order);
-  const useStock = useStockInKey(opts.pe, opts.order);
-  const { buckets } = indexPriceEngine(opts.pe, common, useStock);
+  // Use the same matching pass the live UI uses — gets us the resolved
+  // tuples with match quality (exact / snapped-qty / no-match) and the
+  // closest-qty fallback applied. We only need this scenario's results,
+  // but the matching is scenario-agnostic so we discard the rest.
+  const scResult = computeAllScenarios(opts.order, opts.pe);
+  const resolved = scResult.resolved;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "SinaLite Markup Tuning";
@@ -160,6 +159,7 @@ export async function buildAnnotatedOrdersXlsx(
       fmt: FMT_CURRENCY,
     },
     { header: "Capped?", key: "capped", width: 9 },
+    { header: "Match Quality", key: "matchQuality", width: 26 },
     { header: "New Price CAD", key: "newCad", width: 14, fmt: FMT_CURRENCY },
     { header: usdHeader, key: "newUsd", width: 18, fmt: FMT_CURRENCY },
     {
@@ -198,10 +198,7 @@ export async function buildAnnotatedOrdersXlsx(
   let matchedRowCount = 0;
   let unmatchedRowCount = 0;
 
-  for (const r of opts.order.rows) {
-    const matchKey = orderRowKey(r, common, useStock);
-    const pe = pickByPriceProximity(buckets.get(matchKey), r.avgPaid);
-
+  for (const { row: r, pe, matchQuality, snappedFromQty } of resolved) {
     const baseRow: Record<string, string | number> = {
       description: r.description,
       qty: r.qty,
@@ -218,9 +215,7 @@ export async function buildAnnotatedOrdersXlsx(
       baseRow[`dim_${dim}`] = r.dims[dim] ?? "";
     }
 
-    if (!pe) {
-      // Unmatched — emit row with empty markup math so the user can see
-      // which orders couldn't be matched against the catalog
+    if (!pe || matchQuality === "no-match") {
       ws.addRow({
         ...baseRow,
         baseCost: 0,
@@ -234,6 +229,7 @@ export async function buildAnnotatedOrdersXlsx(
         subtotalPreNbd: 0,
         uncappedNew: 0,
         capped: "no match",
+        matchQuality: "no match",
         newCad: 0,
         newUsd: 0,
         deltaPerOrder: 0,
@@ -269,6 +265,11 @@ export async function buildAnnotatedOrdersXlsx(
     aggregateNew += res.finalPrice * r.orders;
     matchedRowCount += 1;
 
+    const matchQualityLabel =
+      matchQuality === "snapped-qty" && snappedFromQty !== null
+        ? `snapped to qty ${snappedFromQty.toLocaleString()}`
+        : "exact";
+
     ws.addRow({
       ...baseRow,
       baseCost: round(pe.baseCost, 4),
@@ -282,6 +283,7 @@ export async function buildAnnotatedOrdersXlsx(
       subtotalPreNbd: round(subtotalPreNbd, 2),
       uncappedNew: round(res.uncappedPrice, 2),
       capped: res.capped ? "yes" : "no",
+      matchQuality: matchQualityLabel,
       newCad: round(res.finalPrice, 2),
       newUsd: round(res.finalPrice * opts.usdRate, 2),
       deltaPerOrder: round(deltaPerOrder, 2),
@@ -326,6 +328,7 @@ export async function buildAnnotatedOrdersXlsx(
     subtotalPreNbd: 0,
     uncappedNew: 0,
     capped: "",
+    matchQuality: "",
     newCad: round(aggregateNew, 2),
     newUsd: round(aggregateNew * opts.usdRate, 2),
     deltaPerOrder: 0,
