@@ -6,6 +6,7 @@ import {
   RowDimensions,
 } from "./dimensions";
 import { normalizeStock, normalizeSize, normalizeTurnaround } from "./normalize";
+import { isCsvFile, parseCsvToAoa, CsvCell } from "./parseCsv";
 
 export interface PriceEngineRow {
   productName: string;
@@ -136,16 +137,30 @@ function findColIndex(
 }
 
 export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) throw new Error("Price engine file has no sheets.");
-  const ws = wb.Sheets[sheetName];
-  const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
-    header: 1,
-    raw: true,
-    defval: null,
-  });
+  let aoa: CsvCell[][];
+  let sheetNameForLabel: string;
+
+  if (isCsvFile(file)) {
+    // Direct CSV path — bypasses SheetJS so very large files (Brochures
+    // PE3 is 110 MB / 8.6M cells) don't blow up the cell-object model
+    // with "Too many properties to enumerate".
+    const buf = await file.arrayBuffer();
+    const text = new TextDecoder("utf-8").decode(new Uint8Array(buf));
+    aoa = parseCsvToAoa(text);
+    sheetNameForLabel = file.name.replace(/\.[^.]+$/, "");
+  } else {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) throw new Error("Price engine file has no sheets.");
+    const ws = wb.Sheets[sheetName];
+    aoa = XLSX.utils.sheet_to_json<CsvCell[]>(ws, {
+      header: 1,
+      raw: true,
+      defval: null,
+    });
+    sheetNameForLabel = sheetName;
+  }
   if (aoa.length < 2) throw new Error("Price engine file has no data rows.");
 
   const header = aoa[0];
@@ -216,7 +231,7 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     breakdownStart = Math.max(idxPe3, idxConsolidatedMarkup) + 1;
   }
 
-  const productNameFromHeader = (header[0] as string) || sheetName;
+  const productNameFromHeader = (header[0] as string) || sheetNameForLabel;
 
   const rows: PriceEngineRow[] = [];
   const warnings: string[] = [];
@@ -284,7 +299,8 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     );
   }
 
-  const productName = rows[0]?.productName || productNameFromHeader || sheetName;
+  const productName =
+    rows[0]?.productName || productNameFromHeader || sheetNameForLabel;
   const hasStock = rows.some((r) => !!r.stock);
   return {
     productName,

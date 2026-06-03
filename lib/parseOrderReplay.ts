@@ -7,6 +7,7 @@ import {
   RowDimensions,
   buildKey,
 } from "./dimensions";
+import { isCsvFile, parseCsvToAoa, CsvCell } from "./parseCsv";
 
 export interface OrderReplayRow {
   description: string;
@@ -491,22 +492,43 @@ export async function parseOrderReplay(
   file: File,
   opts: { usdRate?: number } = {}
 ): Promise<OrderReplayData> {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const choice = chooseSheet(wb);
-  if (!choice) {
-    throw new Error(
-      `Order replay couldn't find a usable sheet. Sheets found: ${wb.SheetNames.join(", ") || "(none)"}.`
-    );
+  let aoa: CsvCell[][];
+  let format: OrderReplayFormat;
+  let wb: XLSX.WorkBook | null = null; // kept around for unmatched-sheet lookup
+
+  if (isCsvFile(file)) {
+    // CSV path: parse directly, treat as per-order detail when the columns
+    // suggest it, else per-sku aggregated. No multi-sheet machinery.
+    const buf = await file.arrayBuffer();
+    const text = new TextDecoder("utf-8").decode(new Uint8Array(buf));
+    aoa = parseCsvToAoa(text);
+    if (aoa.length < 2)
+      throw new Error("Order replay CSV parsed but has no data rows.");
+    const m = buildColMap(aoa[0]);
+    if (m.orders >= 0 && m.avgPaid >= 0 && m.newPricePerOrder >= 0) {
+      format = "per_sku_aggregated";
+    } else {
+      format = "per_order_detail";
+    }
+  } else {
+    const buf = await file.arrayBuffer();
+    wb = XLSX.read(buf, { type: "array" });
+    const choice = chooseSheet(wb);
+    if (!choice) {
+      throw new Error(
+        `Order replay couldn't find a usable sheet. Sheets found: ${wb.SheetNames.join(", ") || "(none)"}.`
+      );
+    }
+    const { sheetName, format: chosenFormat } = choice;
+    const ws = wb.Sheets[sheetName];
+    aoa = XLSX.utils.sheet_to_json<CsvCell[]>(ws, {
+      header: 1,
+      raw: true,
+      defval: null,
+    });
+    if (aoa.length < 2) throw new Error(`Sheet "${sheetName}" has no data rows.`);
+    format = chosenFormat;
   }
-  const { sheetName, format } = choice;
-  const ws = wb.Sheets[sheetName];
-  const aoa = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
-    header: 1,
-    raw: true,
-    defval: null,
-  });
-  if (aoa.length < 2) throw new Error(`Sheet "${sheetName}" has no data rows.`);
   const m = buildColMap(aoa[0]);
   const dimIdx = detectDimensions(aoa[0]);
   const dimensions = Object.keys(dimIdx).sort();
@@ -535,7 +557,7 @@ export async function parseOrderReplay(
     for (const [k, label] of required) {
       if (m[k] < 0) {
         throw new Error(
-          `Per-order replay missing required column "${label}". Sheet: ${sheetName}.`
+          `Per-order replay missing required column "${label}".`
         );
       }
     }
@@ -566,8 +588,12 @@ export async function parseOrderReplay(
 
   const unmatched =
     format === "per_sku_aggregated"
-      ? countUnmatchedFromLegacySheet(wb)
-      : countUnmatchedFromExtraSheets(wb, cadFromUsd);
+      ? wb
+        ? countUnmatchedFromLegacySheet(wb)
+        : { count: 0, revenue: 0, reasons: new Set<string>() }
+      : wb
+        ? countUnmatchedFromExtraSheets(wb, cadFromUsd)
+        : { count: 0, revenue: 0, reasons: new Set<string>() };
 
   return {
     format,

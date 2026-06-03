@@ -41,6 +41,16 @@ export const DIMENSIONS: readonly DimensionDef[] = [
   { key: "corner", aliases: ["Corner", "Rounded Corner", "PE3 Corner"] },
   { key: "perforation", aliases: ["Perforation", "PE3 Perforation"] },
   { key: "drilling", aliases: ["Drilling", "PE3 Drilling"] },
+  { key: "foldType", aliases: ["Fold Type", "PE3 Fold Type", "Folding Type", "Fold"] },
+  {
+    key: "foldingSample",
+    aliases: [
+      "Do you have a folding sample?",
+      "Folding Sample",
+      "Folding sample",
+      "PE3 Folding Sample",
+    ],
+  },
 ];
 
 /** Build a Map from header-name (lowercased) → canonical dimension key. */
