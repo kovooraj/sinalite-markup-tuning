@@ -22,6 +22,10 @@ export interface OnePagerPdfOpts {
    * top of the 1-pager so reviewers know what "Base" and "Finishing" mean
    * for this specific product. */
   costCenters: { base: string[]; finishing: string[] };
+  /** When true (default), formulas show the MIN(..., Current Sale Price)
+   * capped form. When false, the cap clause is dropped from every formula
+   * and the subtitle reflects "Cap rule: DISABLED". */
+  applyCapRule?: boolean;
 }
 
 // --- formatters ---------------------------------------------------------
@@ -168,6 +172,7 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const c: Cursor = { y: MARGIN };
   const A = SCENARIO_BY_ID["A_Current_Locked"];
+  const applyCapRule = opts.applyCapRule ?? true;
 
   // Title
   doc.setFont("helvetica", "bold");
@@ -182,11 +187,14 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   );
   c.y += 8;
 
-  // Subtitle
+  // Subtitle — reflects whether the cap rule is in force for this analysis
+  const subtitleCapLine = applyCapRule
+    ? "Cap rule applies to ALL: final price = MIN(model price, current published price)"
+    : "Cap rule DISABLED for this analysis: final price = model price (uncapped — may exceed current published price)";
   para(
     doc,
     c,
-    `Decisions locked ${opts.lockedDate}  |  Cap rule applies to ALL: final price = MIN(model price, current published price)`,
+    `Decisions locked ${opts.lockedDate}  |  ${subtitleCapLine}`,
     { italic: true, size: 8.5 }
   );
 
@@ -224,7 +232,10 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   // Section 1 — BASE
   heading(doc, c, "1. BASE Product Markup");
   para(doc, c, "Applied to PE3 base cost. Volume-discount gradient — markup decreases as qty rises.");
-  para(doc, c, "Formula:  Base Price = MIN(PE3 Base Cost × (1 + Markup %), Current Sale Price)", { bold: true });
+  const baseFormula = applyCapRule
+    ? "Formula:  Base Price = MIN(PE3 Base Cost × (1 + Markup %), Current Sale Price)"
+    : "Formula:  Base Price = PE3 Base Cost × (1 + Markup %)  (uncapped)";
+  para(doc, c, baseFormula, { bold: true });
   markupTable(doc, c,
     ["Qty Band", "Markup %", "Multiplier", "Example: $30 cost ->"],
     [
@@ -235,8 +246,11 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
     ]
   );
   const concLine = opts.baseImpact.concentrationLabel ? ` ${opts.baseImpact.concentrationLabel}` : "";
+  const capTrailer = applyCapRule
+    ? " Cap rule means no customer ever sees a price increase."
+    : "";
   para(doc, c,
-    `Catalog impact: ${fmtUsd(opts.baseImpact.impactUsd, { signed: true })} (${fmtPct(opts.baseImpact.pct)}) on base SKUs.${concLine} Cap rule means no customer ever sees a price increase.`,
+    `Catalog impact: ${fmtUsd(opts.baseImpact.impactUsd, { signed: true })} (${fmtPct(opts.baseImpact.pct)}) on base SKUs.${concLine}${capTrailer}`,
     { italic: true }
   );
 
@@ -261,7 +275,10 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   // Section 3 — TURNAROUND / NBD
   heading(doc, c, "3. TURNAROUND — Rush / Next Business Day (NBD)");
   para(doc, c, "Multiplier applied to TOTAL order subtotal (base + bundling + scoring) when customer selects rush.");
-  para(doc, c, "Formula:  Final Price = (Base + Add-ons) × (1 + NBD Markup),  capped at current published NBD price", { bold: true });
+  const nbdFormula = applyCapRule
+    ? "Formula:  Final Price = (Base + Add-ons) × (1 + NBD Markup),  capped at current published NBD price"
+    : "Formula:  Final Price = (Base + Add-ons) × (1 + NBD Markup)  (uncapped)";
+  para(doc, c, nbdFormula, { bold: true });
   markupTable(doc, c,
     ["Qty Band", "Markup %", "Multiplier", "Example: $50 subtotal ->"],
     [

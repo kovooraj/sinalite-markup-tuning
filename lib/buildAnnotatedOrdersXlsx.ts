@@ -181,6 +181,18 @@ export async function buildAnnotatedOrdersXlsx(
       key: "totalDelta",
       width: 20,
       fmt: FMT_CURRENCY,
+    },
+    {
+      header: "Current Margin",
+      key: "currentMargin",
+      width: 14,
+      fmt: FMT_CURRENCY,
+    },
+    {
+      header: "New Margin",
+      key: "newMargin",
+      width: 14,
+      fmt: FMT_CURRENCY,
     }
   );
 
@@ -198,6 +210,14 @@ export async function buildAnnotatedOrdersXlsx(
   let aggregatePaid = 0; // sum of avgPaid × orders (context, not the delta baseline)
   let aggregateList = 0; // sum of PE3 list × orders (delta baseline)
   let aggregateNew = 0;
+  let aggregateBaseCost = 0;
+  let aggregateFinCost = 0;
+  let aggregateMarkedBase = 0;
+  let aggregateMarkedFin = 0;
+  let aggregateSubtotal = 0;
+  let aggregateUncapped = 0;
+  let aggregateCurrentMargin = 0;
+  let aggregateNewMargin = 0;
   let matchedRowCount = 0;
   let unmatchedRowCount = 0;
 
@@ -237,6 +257,8 @@ export async function buildAnnotatedOrdersXlsx(
         newUsd: 0,
         deltaPerOrder: 0,
         totalDelta: 0,
+        currentMargin: 0,
+        newMargin: 0,
       });
       unmatchedRowCount += 1;
       continue;
@@ -264,11 +286,22 @@ export async function buildAnnotatedOrdersXlsx(
     // When cap rule disabled: delta can go positive.
     const deltaPerOrder = res.finalPrice - pe.currentSalePrice;
     const totalDelta = deltaPerOrder * r.orders;
+    const variantCost = pe.baseCost + pe.finCost;
+    const currentMargin = r.avgPaid - variantCost;
+    const newMargin = res.finalPrice - variantCost;
 
     aggregateDelta += totalDelta;
     aggregatePaid += r.avgPaid * r.orders;
     aggregateList += pe.currentSalePrice * r.orders;
     aggregateNew += res.finalPrice * r.orders;
+    aggregateBaseCost += pe.baseCost * r.orders;
+    aggregateFinCost += pe.finCost * r.orders;
+    aggregateMarkedBase += res.basePrice * r.orders;
+    aggregateMarkedFin += res.finPrice * r.orders;
+    aggregateSubtotal += subtotalPreNbd * r.orders;
+    aggregateUncapped += res.uncappedPrice * r.orders;
+    aggregateCurrentMargin += currentMargin * r.orders;
+    aggregateNewMargin += newMargin * r.orders;
     matchedRowCount += 1;
 
     const matchQualityLabel =
@@ -294,6 +327,8 @@ export async function buildAnnotatedOrdersXlsx(
       newUsd: round(res.finalPrice * opts.usdRate, 2),
       deltaPerOrder: round(deltaPerOrder, 2),
       totalDelta: round(totalDelta, 2),
+      currentMargin: round(currentMargin, 2),
+      newMargin: round(newMargin, 2),
     });
   }
 
@@ -314,30 +349,38 @@ export async function buildAnnotatedOrdersXlsx(
 
   // TOTAL row
   const annualizedSum = aggregateDelta * 4;
+  // Total order count summed across data rows — for per-order detail (each
+  // row = 1 order) this equals matchedRowCount + unmatchedRowCount; for
+  // per-sku aggregated it equals sum of the Orders column.
+  const totalOrders = matchedRowCount + unmatchedRowCount > 0
+    ? opts.order.rows.reduce((sum, r) => sum + r.orders, 0)
+    : 0;
   const totalRow: Record<string, string | number> = {
     description: `TOTAL (${matchedRowCount} matched · ${unmatchedRowCount} unmatched) · Annualized × 4 = $${annualizedSum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     qty: "",
     stock: "",
     size: "",
     turnaround: "",
-    orders: opts.order.totals.orders,
-    avgPaid: round(aggregatePaid, 2), // sum of what customers actually paid
-    baseCost: 0,
-    finCost: 0,
-    currentSalePrice: round(aggregateList, 2), // sum of PE3 list prices = delta baseline
+    orders: totalOrders,
+    avgPaid: round(aggregatePaid, 2),
+    baseCost: round(aggregateBaseCost, 2),
+    finCost: round(aggregateFinCost, 2),
+    currentSalePrice: round(aggregateList, 2),
     baseMkup: 0,
     finMkup: 0,
     nbdMkup: 0,
-    markedBase: 0,
-    markedFin: 0,
-    subtotalPreNbd: 0,
-    uncappedNew: 0,
+    markedBase: round(aggregateMarkedBase, 2),
+    markedFin: round(aggregateMarkedFin, 2),
+    subtotalPreNbd: round(aggregateSubtotal, 2),
+    uncappedNew: round(aggregateUncapped, 2),
     capped: "",
     matchQuality: "",
     newCad: round(aggregateNew, 2),
     newUsd: round(aggregateNew * opts.usdRate, 2),
-    deltaPerOrder: 0,
+    deltaPerOrder: round(aggregateDelta, 2),
     totalDelta: round(aggregateDelta, 2),
+    currentMargin: round(aggregateCurrentMargin, 2),
+    newMargin: round(aggregateNewMargin, 2),
   };
   for (const dim of allDims) totalRow[`dim_${dim}`] = "";
   for (const idCol of opts.order.identifierColumns)

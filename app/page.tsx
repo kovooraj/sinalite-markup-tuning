@@ -300,6 +300,7 @@ export default function Home() {
         targetMinPct: meta.targetMinPct,
         targetMaxPct: meta.targetMaxPct,
         costCenters: computed.pe.costCenters,
+        applyCapRule: meta.applyCapRule,
       });
     } finally {
       setGenerating(false);
