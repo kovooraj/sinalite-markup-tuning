@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { FileDrop } from "@/components/FileDrop";
 import { MetaForm, MetaFormValues } from "@/components/MetaForm";
 import { ResultsPanel } from "@/components/ResultsPanel";
@@ -13,10 +13,12 @@ import { makeCustomScenario, ScenarioDef } from "@/lib/markupEngine";
 import {
   getSavedScenariosServerSnapshot,
   getSavedScenariosSnapshot,
+  refreshSavedScenariosFromRemote,
+  removeSavedScenario,
   savedRecordToScenario,
   SavedScenarioRecord,
-  setSavedScenarios,
   subscribeSavedScenarios,
+  upsertSavedScenario,
 } from "@/lib/savedScenarios";
 import { InfoIcon } from "@/components/InfoIcon";
 import { parsePriceEngine, PriceEngineData } from "@/lib/parsePriceEngine";
@@ -191,13 +193,20 @@ export default function Home() {
   // True only while the modal is open because the checkbox was just ticked —
   // Cancel then unticks it again.
   const [customPendingEnable, setCustomPendingEnable] = useState(false);
-  // Saved scenarios live in localStorage, exposed as an external store so
-  // SSR renders empty and the client snapshot takes over after hydration.
+  // Saved scenarios are shared across all users via Supabase, with
+  // localStorage as the instant-load cache / offline fallback. Exposed as an
+  // external store so SSR renders empty and the client snapshot takes over
+  // after hydration.
   const savedRecs = useSyncExternalStore(
     subscribeSavedScenarios,
     getSavedScenariosSnapshot,
     getSavedScenariosServerSnapshot
   );
+
+  // Pull the shared list once on load; the store notifies when it lands.
+  useEffect(() => {
+    void refreshSavedScenariosFromRemote();
+  }, []);
 
   const customScenario = useMemo<ScenarioDef | null>(
     () =>
@@ -256,22 +265,20 @@ export default function Home() {
       fin: values.fin,
       nbd: values.nbd,
     };
-    const newId = savedRecordToScenario(rec).id;
-    // Replace any existing scenario that would collide on id (same name, or
-    // a different name that slugs to the same id).
-    const next = [
-      ...savedRecs.filter((r) => savedRecordToScenario(r).id !== newId),
-      rec,
-    ];
-    setSavedScenarios(next);
-    runGenerate({ saved: next.map(savedRecordToScenario) });
+    // Updates the local cache immediately and syncs to the shared Supabase
+    // table in the background (replacing any scenario with a colliding id).
+    upsertSavedScenario(rec);
+    runGenerate({
+      saved: getSavedScenariosSnapshot().map(savedRecordToScenario),
+    });
     return null;
   }
 
   function handleDeleteSaved(name: string) {
-    const next = savedRecs.filter((r) => r.name !== name);
-    setSavedScenarios(next);
-    runGenerate({ saved: next.map(savedRecordToScenario) });
+    removeSavedScenario(name);
+    runGenerate({
+      saved: getSavedScenariosSnapshot().map(savedRecordToScenario),
+    });
   }
 
   interface GenerateOverrides {
@@ -536,7 +543,7 @@ export default function Home() {
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="flex items-center text-xs font-semibold text-zinc-700">
                 <span>Saved scenarios</span>
-                <InfoIcon text="Named scenarios you saved from the Custom scenario popup (stored in this browser). Each one runs alongside A–H in every report for comparison. Click × to delete one." />
+                <InfoIcon text="Named scenarios saved from the Custom scenario popup. Shared with everyone who uses this app — each one runs alongside A–H in every report for comparison. Click × to delete one (for everyone)." />
               </span>
               {savedDefs.map((def, i) => (
                 <span

@@ -161,7 +161,9 @@ function ModalBody({
       return;
     }
     setSaveError("");
-    setSavedMsg(`Saved "${trimmedName}" — it will run alongside A–H in every report.`);
+    setSavedMsg(
+      `Saved "${trimmedName}" — shared with everyone who uses this app, it will run alongside A–H in every report.`
+    );
     setSaveOpen(false);
     setSaveName("");
   }
@@ -290,7 +292,7 @@ function ModalBody({
               setSaveOpen(true);
             }}
             className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-            title="Save these percentages as a named scenario — it will run alongside A–H in every future report on this browser"
+            title="Save these percentages as a named scenario — shared with everyone who uses this app, it will run alongside A–H in every future report"
           >
             💾 Save scenario…
           </button>

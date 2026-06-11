@@ -155,7 +155,7 @@ export function makeSavedScenario(
     base,
     fin,
     nbd,
-    `Saved scenario "${name.trim()}" (stored in this browser). Base ${fmt4(base)}, finishing ${fmt4(fin)}, NBD ${fmt3(nbd)}. Runs alongside A–H in every report for comparison until you delete it.`
+    `Saved scenario "${name.trim()}" (shared — visible to everyone who uses this app). Base ${fmt4(base)}, finishing ${fmt4(fin)}, NBD ${fmt3(nbd)}. Runs alongside A–H in every report for comparison until someone deletes it.`
   );
 }
 
