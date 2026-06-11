@@ -54,13 +54,31 @@ const FINISHING_MACHINE_PATTERNS = [
   /stitchmaster/i,
 ];
 
-function isFinishingMachine(name: string): boolean {
+/** Product-specific exceptions: machines that would normally classify as
+ * finishing but are part of producing the base product for certain product
+ * families. Checked before FINISHING_MACHINE_PATTERNS. */
+const BASE_MACHINE_OVERRIDES: { product: RegExp; machine: RegExp }[] = [
+  // Brochures only: the Stahlfold B30 #1 fold is what makes a brochure a
+  // brochure — its cost belongs in base, not finishing. (Tolerates the
+  // common "Stahifold" misspelling and optional "#".)
+  { product: /brochure/i, machine: /stah[li]fold\s*b30\s*#?\s*1\b/i },
+];
+
+function isFinishingMachine(name: string, productName: string): boolean {
   if (!name) return false;
+  if (
+    BASE_MACHINE_OVERRIDES.some(
+      (o) => o.product.test(productName) && o.machine.test(name)
+    )
+  ) {
+    return false;
+  }
   return FINISHING_MACHINE_PATTERNS.some((re) => re.test(name));
 }
 
 function extractCostBreakdown(
   cells: (string | number | null)[],
+  productName: string,
   baseSeen: Set<string>,
   finSeen: Set<string>
 ): {
@@ -93,7 +111,7 @@ function extractCostBreakdown(
         j += 1;
       }
       if (totalCost !== null && machine) {
-        if (isFinishingMachine(machine)) {
+        if (isFinishingMachine(machine, productName)) {
           finCost += totalCost;
           finSeen.add(machine);
         } else {
@@ -269,6 +287,7 @@ export async function parsePriceEngine(file: File): Promise<PriceEngineData> {
     const breakdownCells = row.slice(breakdownStart);
     const { baseCost, finCost } = extractCostBreakdown(
       breakdownCells,
+      String(productName).trim(),
       baseSeen,
       finSeen
     );
