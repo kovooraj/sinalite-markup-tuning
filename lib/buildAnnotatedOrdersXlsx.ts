@@ -15,10 +15,10 @@ export interface BuildAnnotatedOrdersOpts {
   /** When false the cap rule is NOT applied — final price floats free of
    * the PE3 list price and delta vs list can go positive. Defaults to true. */
   applyCapRule?: boolean;
-  /** User-defined custom scenario (from the Custom scenario checkbox). When
-   * scenarioId matches its id, this definition is used instead of the
-   * built-in A–H table. */
-  customScenario?: ScenarioDef | null;
+  /** Extra scenario definitions beyond the built-in A–H table — the user's
+   * custom scenario and any saved scenarios. When scenarioId matches one of
+   * these, that definition is used. */
+  extraScenarios?: readonly ScenarioDef[];
 }
 
 const FMT_CURRENCY = '"$"#,##0.00;("$"#,##0.00);"-"';
@@ -76,7 +76,7 @@ export async function buildAnnotatedOrdersXlsx(
 ): Promise<Blob> {
   const scenario: ScenarioDef | undefined = resolveScenario(
     opts.scenarioId,
-    opts.customScenario
+    opts.extraScenarios
   );
   if (!scenario) throw new Error(`Unknown scenario: ${opts.scenarioId}`);
 
@@ -90,7 +90,8 @@ export async function buildAnnotatedOrdersXlsx(
   const wb = new ExcelJS.Workbook();
   wb.creator = "SinaLite Markup Tuning";
   wb.created = new Date();
-  const ws = wb.addWorksheet(`Annotated_${opts.scenarioId}`, {
+  // Excel caps worksheet names at 31 chars — saved-scenario ids can be long
+  const ws = wb.addWorksheet(`Annotated_${opts.scenarioId}`.slice(0, 31), {
     views: [{ state: "frozen", xSplit: 4, ySplit: 1 }],
   });
 

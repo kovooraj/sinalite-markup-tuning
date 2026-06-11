@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { FileDrop } from "@/components/FileDrop";
 import { MetaForm, MetaFormValues } from "@/components/MetaForm";
 import { ResultsPanel } from "@/components/ResultsPanel";
@@ -10,6 +10,14 @@ import {
   defaultCustomGradient,
 } from "@/components/CustomScenarioModal";
 import { makeCustomScenario, ScenarioDef } from "@/lib/markupEngine";
+import {
+  getSavedScenariosServerSnapshot,
+  getSavedScenariosSnapshot,
+  savedRecordToScenario,
+  SavedScenarioRecord,
+  setSavedScenarios,
+  subscribeSavedScenarios,
+} from "@/lib/savedScenarios";
 import { InfoIcon } from "@/components/InfoIcon";
 import { parsePriceEngine, PriceEngineData } from "@/lib/parsePriceEngine";
 import { parseOrderReplay, OrderReplayData } from "@/lib/parseOrderReplay";
@@ -39,8 +47,11 @@ interface ComputedState {
   finImpact: ReturnType<typeof computeFinishingCatalogImpact>;
   nbdLift: ReturnType<typeof computeNbdLift>;
   /** Custom scenario active when this run was generated (null = none). The
-   * downloads use this snapshot so they always match the on-screen table. */
+   * 1-pager bases its markup tables / impact stats on this. */
   customScenario: ScenarioDef | null;
+  /** All extra scenarios in this run (saved + custom). The downloads use
+   * this snapshot so they always match the on-screen table. */
+  extraScenarios: ScenarioDef[];
 }
 
 function todayIsoDate(): string {
@@ -180,6 +191,13 @@ export default function Home() {
   // True only while the modal is open because the checkbox was just ticked —
   // Cancel then unticks it again.
   const [customPendingEnable, setCustomPendingEnable] = useState(false);
+  // Saved scenarios live in localStorage, exposed as an external store so
+  // SSR renders empty and the client snapshot takes over after hydration.
+  const savedRecs = useSyncExternalStore(
+    subscribeSavedScenarios,
+    getSavedScenariosSnapshot,
+    getSavedScenariosServerSnapshot
+  );
 
   const customScenario = useMemo<ScenarioDef | null>(
     () =>
@@ -187,6 +205,11 @@ export default function Home() {
         ? makeCustomScenario(customGrad.base, customGrad.fin, customGrad.nbd)
         : null,
     [customEnabled, customGrad]
+  );
+
+  const savedDefs = useMemo<ScenarioDef[]>(
+    () => savedRecs.map(savedRecordToScenario),
+    [savedRecs]
   );
 
   const canGenerate = !!priceFile && !!orderFile && !generating;
@@ -198,7 +221,7 @@ export default function Home() {
       setCustomModalOpen(true);
     } else {
       setCustomEnabled(false);
-      runGenerate(null);
+      runGenerate({ custom: null });
     }
   }
 
@@ -208,7 +231,7 @@ export default function Home() {
     setCustomPendingEnable(false);
     // Refresh the on-screen report with the new gradients if one was
     // already generated.
-    runGenerate(makeCustomScenario(next.base, next.fin, next.nbd));
+    runGenerate({ custom: makeCustomScenario(next.base, next.fin, next.nbd) });
   }
 
   function handleCustomCancel() {
@@ -220,17 +243,59 @@ export default function Home() {
     }
   }
 
-  /** Re-run the report (if one is on screen) with the given custom scenario. */
-  function runGenerate(scenario: ScenarioDef | null) {
-    if (computed) void handleGenerate(scenario);
+  /** Save the current popup gradients under a name. Persists to localStorage
+   * and refreshes the on-screen report so the new scenario shows up in the
+   * comparison immediately. Returns an error string or null on success. */
+  function handleSaveScenario(
+    name: string,
+    values: CustomGradientValues
+  ): string | null {
+    const rec: SavedScenarioRecord = {
+      name,
+      base: values.base,
+      fin: values.fin,
+      nbd: values.nbd,
+    };
+    const newId = savedRecordToScenario(rec).id;
+    // Replace any existing scenario that would collide on id (same name, or
+    // a different name that slugs to the same id).
+    const next = [
+      ...savedRecs.filter((r) => savedRecordToScenario(r).id !== newId),
+      rec,
+    ];
+    setSavedScenarios(next);
+    runGenerate({ saved: next.map(savedRecordToScenario) });
+    return null;
   }
 
-  async function handleGenerate(
-    customOverride?: ScenarioDef | null
-  ) {
+  function handleDeleteSaved(name: string) {
+    const next = savedRecs.filter((r) => r.name !== name);
+    setSavedScenarios(next);
+    runGenerate({ saved: next.map(savedRecordToScenario) });
+  }
+
+  interface GenerateOverrides {
+    custom?: ScenarioDef | null;
+    saved?: ScenarioDef[];
+  }
+
+  /** Re-run the report (if one is on screen) with overridden extras —
+   * avoids stale-state reads when a handler just changed them. */
+  function runGenerate(overrides?: GenerateOverrides) {
+    if (computed) void handleGenerate(overrides);
+  }
+
+  async function handleGenerate(overrides?: GenerateOverrides) {
     if (!priceFile || !orderFile) return;
     const activeCustom =
-      customOverride !== undefined ? customOverride : customScenario;
+      overrides && "custom" in overrides
+        ? (overrides.custom ?? null)
+        : customScenario;
+    const activeSaved = overrides?.saved ?? savedDefs;
+    const extraScenarios = [
+      ...activeSaved,
+      ...(activeCustom ? [activeCustom] : []),
+    ];
     setGenerating(true);
     setPriceErr("");
     setOrderErr("");
@@ -252,7 +317,7 @@ export default function Home() {
       }
       const scenarios = computeAllScenarios(order, pe, {
         applyCapRule: meta.applyCapRule,
-        extraScenarios: activeCustom ? [activeCustom] : [],
+        extraScenarios,
       });
       // Don't hard-block on zero matches — instead surface a strong warning
       // alongside the (empty) results so the user can still see what was
@@ -298,6 +363,7 @@ export default function Home() {
         nbdLift,
         lossLeaders,
         customScenario: activeCustom ?? null,
+        extraScenarios,
       });
     } catch {
       // errors surfaced inline above
@@ -333,7 +399,7 @@ export default function Home() {
         scenarioId,
         usdRate: meta.usdRate || 0.7,
         applyCapRule: meta.applyCapRule,
-        customScenario: computed.customScenario,
+        extraScenarios: computed.extraScenarios,
       });
     } finally {
       setGenerating(false);
@@ -351,7 +417,7 @@ export default function Home() {
         usdRate: meta.usdRate || 0.7,
         productSlug: computed.pe.productSlug,
         applyCapRule: meta.applyCapRule,
-        customScenario: computed.customScenario,
+        extraScenarios: computed.extraScenarios,
       });
     } finally {
       setGenerating(false);
@@ -466,6 +532,32 @@ export default function Home() {
               </>
             )}
           </div>
+          {savedRecs.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="flex items-center text-xs font-semibold text-zinc-700">
+                <span>Saved scenarios</span>
+                <InfoIcon text="Named scenarios you saved from the Custom scenario popup (stored in this browser). Each one runs alongside A–H in every report for comparison. Click × to delete one." />
+              </span>
+              {savedDefs.map((def, i) => (
+                <span
+                  key={def.id}
+                  className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-1 font-mono text-[11px] text-violet-800"
+                  title={def.label}
+                >
+                  {savedRecs[i].name}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSaved(savedRecs[i].name)}
+                    className="ml-0.5 rounded px-1 font-sans text-violet-500 hover:bg-violet-100 hover:text-violet-900"
+                    title={`Delete saved scenario "${savedRecs[i].name}"`}
+                    aria-label={`Delete saved scenario ${savedRecs[i].name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -495,7 +587,7 @@ export default function Home() {
             recommendation={computed.recommendation}
             sanity={computed.sanity}
             generating={generating}
-            customScenario={computed.customScenario}
+            extraScenarios={computed.extraScenarios}
             onDownloadOnePager={handleDownloadOnePager}
             onDownloadScenarios={handleDownloadScenarios}
             onDownloadRepriced={handleDownloadRepriced}
@@ -509,6 +601,8 @@ export default function Home() {
         values={customGrad}
         onApply={handleCustomApply}
         onCancel={handleCustomCancel}
+        onSave={handleSaveScenario}
+        savedNames={savedRecs.map((r) => r.name)}
       />
 
       <footer className="mt-12 border-t border-zinc-200 pt-4 text-xs text-zinc-500">

@@ -25,6 +25,11 @@ interface Props {
   values: CustomGradientValues;
   onApply: (next: CustomGradientValues) => void;
   onCancel: () => void;
+  /** Save the current gradients as a named scenario. Returns an error
+   * message to display, or null on success. */
+  onSave: (name: string, values: CustomGradientValues) => string | null;
+  /** Names already saved — used to warn that saving will overwrite. */
+  savedNames: string[];
 }
 
 /** Percent strings for editing — one per band, e.g. "35". */
@@ -122,17 +127,44 @@ function SectionTable({
   );
 }
 
-export function CustomScenarioModal({ open, values, onApply, onCancel }: Props) {
+export function CustomScenarioModal({ open, ...rest }: Props) {
   // The body is mounted only while open, so its draft state re-seeds from the
   // saved values on every open — Cancel → reopen never shows abandoned edits.
   if (!open) return null;
-  return <ModalBody values={values} onApply={onApply} onCancel={onCancel} />;
+  return <ModalBody {...rest} />;
 }
 
-function ModalBody({ values, onApply, onCancel }: Omit<Props, "open">) {
+function ModalBody({
+  values,
+  onApply,
+  onCancel,
+  onSave,
+  savedNames,
+}: Omit<Props, "open">) {
   const [draft, setDraft] = useState<DraftStrings>(() => toDraft(values));
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveError, setSaveError] = useState<string>("");
+  const [savedMsg, setSavedMsg] = useState<string>("");
 
   const parsed = parseDraft(draft);
+  const trimmedName = saveName.trim();
+  const willOverwrite = savedNames.some(
+    (n) => n.toLowerCase() === trimmedName.toLowerCase()
+  );
+
+  function handleSave() {
+    if (!parsed || !trimmedName) return;
+    const err = onSave(trimmedName, parsed);
+    if (err) {
+      setSaveError(err);
+      return;
+    }
+    setSaveError("");
+    setSavedMsg(`Saved "${trimmedName}" — it will run alongside A–H in every report.`);
+    setSaveOpen(false);
+    setSaveName("");
+  }
 
   function setBand(section: keyof DraftStrings, idx: number, v: string) {
     setDraft((d) => {
@@ -191,22 +223,94 @@ function ModalBody({ values, onApply, onCancel }: Omit<Props, "open">) {
           </p>
         )}
 
-        <div className="mt-5 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Cancel
-          </button>
+        {savedMsg && (
+          <p className="mt-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+            ✓ {savedMsg}
+          </p>
+        )}
+
+        {saveOpen && (
+          <div className="mt-4 rounded border border-zinc-200 bg-zinc-50 p-3">
+            <label className="block text-xs font-semibold text-zinc-700">
+              Scenario name
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="text"
+                value={saveName}
+                onChange={(e) => {
+                  setSaveName(e.target.value);
+                  setSaveError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSave();
+                }}
+                placeholder="e.g. Q3 Brochure Test"
+                autoFocus
+                className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+              />
+              <button
+                type="button"
+                disabled={!parsed || !trimmedName}
+                onClick={handleSave}
+                className="shrink-0 rounded bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSaveOpen(false);
+                  setSaveName("");
+                  setSaveError("");
+                }}
+                className="shrink-0 rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+              >
+                Cancel
+              </button>
+            </div>
+            {willOverwrite && trimmedName && (
+              <p className="mt-1 text-[11px] text-amber-700">
+                A scenario named “{trimmedName}” already exists — saving will
+                replace it.
+              </p>
+            )}
+            {saveError && (
+              <p className="mt-1 text-[11px] text-red-600">{saveError}</p>
+            )}
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
             disabled={!parsed}
-            onClick={() => parsed && onApply(parsed)}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={() => {
+              setSavedMsg("");
+              setSaveOpen(true);
+            }}
+            className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            title="Save these percentages as a named scenario — it will run alongside A–H in every future report on this browser"
           >
-            Apply custom scenario
+            💾 Save scenario…
           </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!parsed}
+              onClick={() => parsed && onApply(parsed)}
+              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Apply custom scenario
+            </button>
+          </div>
         </div>
       </div>
     </div>

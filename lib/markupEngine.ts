@@ -132,14 +132,43 @@ export function makeCustomScenario(
   );
 }
 
-/** Resolve a scenario id against the built-in table, falling back to a
- * caller-supplied custom scenario when the id matches it. */
+export const SAVED_SCENARIO_PREFIX = "Saved_";
+
+/** Build a ScenarioDef from a user-saved named scenario. The id is derived
+ * from the name so it stays stable across sessions and never collides with
+ * the built-in A–H ids or X_Custom. */
+export function makeSavedScenario(
+  name: string,
+  base: Gradient["base"],
+  fin: Gradient["fin"],
+  nbd: Gradient["nbd"]
+): ScenarioDef {
+  const slug =
+    name
+      .trim()
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 40) || "scenario";
+  return makeScenario(
+    `${SAVED_SCENARIO_PREFIX}${slug}`,
+    `${name.trim()} — saved (${fmt4(base)} base, ${fmt4(fin)} fin, ${fmt3(nbd)} NBD)`,
+    base,
+    fin,
+    nbd,
+    `Saved scenario "${name.trim()}" (stored in this browser). Base ${fmt4(base)}, finishing ${fmt4(fin)}, NBD ${fmt3(nbd)}. Runs alongside A–H in every report for comparison until you delete it.`
+  );
+}
+
+/** Resolve a scenario id against the built-in table, falling back to any
+ * caller-supplied extra scenarios (custom and/or saved) when the id matches
+ * one of them. */
 export function resolveScenario(
   id: string,
-  custom?: ScenarioDef | null
+  extras?: readonly ScenarioDef[] | ScenarioDef | null
 ): ScenarioDef | undefined {
-  if (custom && custom.id === id) return custom;
-  return SCENARIO_BY_ID[id];
+  const list = Array.isArray(extras) ? extras : extras ? [extras] : [];
+  const hit = list.find((s) => s.id === id);
+  return hit ?? SCENARIO_BY_ID[id];
 }
 
 export interface PriceComputeInput {

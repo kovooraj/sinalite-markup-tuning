@@ -97,12 +97,19 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
     }
   });
 
-  // R15: Customer Impact Distribution title
-  ws.mergeCells("A15:H15");
-  ws.getCell("A15").value = "Customer Impact Distribution (% of orders)";
-  ws.getCell("A15").font = { bold: true };
+  // Section offsets are dynamic — saved scenarios can push the count past
+  // the original 8, so each section starts 3 rows after the previous one ends
+  // (matching the original fixed layout's spacing at n = 8).
+  const n = opts.results.length;
+  const distTitleRow = 4 + n + 3; // 15 when n = 8
 
-  // R16: Header
+  // Customer Impact Distribution title
+  ws.mergeCells(`A${distTitleRow}:H${distTitleRow}`);
+  ws.getCell(`A${distTitleRow}`).value =
+    "Customer Impact Distribution (% of orders)";
+  ws.getCell(`A${distTitleRow}`).font = { bold: true };
+
+  // Header
   const header2 = [
     "Scenario",
     "No Change",
@@ -111,12 +118,12 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
     "Increase 1-5%",
     "Increase >5%",
   ];
-  ws.getRow(16).values = header2;
-  ws.getRow(16).font = { bold: true };
+  ws.getRow(distTitleRow + 1).values = header2;
+  ws.getRow(distTitleRow + 1).font = { bold: true };
 
-  // R17..R24: per scenario
+  // Per scenario
   opts.results.forEach((s, i) => {
-    const r = 17 + i;
+    const r = distTitleRow + 2 + i;
     ws.getRow(r).values = [
       s.id,
       s.dist.noChange,
@@ -130,49 +137,59 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
     }
   });
 
-  // R27: 3-Month $ Delta by Qty Band title
-  ws.mergeCells("A27:H27");
-  ws.getCell("A27").value = "3-Month $ Delta by Qty Band";
-  ws.getCell("A27").font = { bold: true };
+  // 3-Month $ Delta by Qty Band title
+  const bandTitleRow = distTitleRow + 1 + n + 3; // 27 when n = 8
+  ws.mergeCells(`A${bandTitleRow}:H${bandTitleRow}`);
+  ws.getCell(`A${bandTitleRow}`).value = "3-Month $ Delta by Qty Band";
+  ws.getCell(`A${bandTitleRow}`).font = { bold: true };
 
-  // R28: header
+  // Header
   const header3 = ["Scenario", ...BASE_BAND_LABELS];
-  ws.getRow(28).values = header3;
-  ws.getRow(28).font = { bold: true };
+  ws.getRow(bandTitleRow + 1).values = header3;
+  ws.getRow(bandTitleRow + 1).font = { bold: true };
 
-  // R29..R36: per scenario
+  // Per scenario
   opts.results.forEach((s, i) => {
-    const r = 29 + i;
+    const r = bandTitleRow + 2 + i;
     ws.getRow(r).values = [s.id, ...s.deltaByBand];
     for (const col of ["B", "C", "D", "E"]) {
       ws.getCell(`${col}${r}`).numFmt = CURRENCY_FMT;
     }
   });
 
-  // R39+: Recommendation block — pick + SOP-aligned reasoning
+  // Recommendation block — pick + SOP-aligned reasoning
+  const recTitleRow = bandTitleRow + 1 + n + 3; // 39 when n = 8
   const rec = opts.recommendation;
   const recRow = rec.recommended;
   const targetBandStr = `[${(opts.targetMinPct * 100).toFixed(1)}%, ${(opts.targetMaxPct * 100).toFixed(1)}%]`;
-  ws.mergeCells("A39:H39");
-  ws.getCell("A39").value = "Recommendation (per sinalite-pricing-model SOP)";
-  ws.getCell("A39").font = { bold: true, size: 12 };
+  ws.mergeCells(`A${recTitleRow}:H${recTitleRow}`);
+  ws.getCell(`A${recTitleRow}`).value =
+    "Recommendation (per sinalite-pricing-model SOP)";
+  ws.getCell(`A${recTitleRow}`).font = { bold: true, size: 12 };
 
-  ws.mergeCells("A40:H40");
-  ws.getCell("A40").value = `Target band: ${targetBandStr} · ${rec.inBand.length} of ${rec.inBand.length + rec.outOfBand.length} scenarios in band`;
-  ws.getCell("A40").font = { italic: true, color: { argb: "FF555555" } };
+  ws.mergeCells(`A${recTitleRow + 1}:H${recTitleRow + 1}`);
+  ws.getCell(`A${recTitleRow + 1}`).value =
+    `Target band: ${targetBandStr} · ${rec.inBand.length} of ${rec.inBand.length + rec.outOfBand.length} scenarios in band`;
+  ws.getCell(`A${recTitleRow + 1}`).font = {
+    italic: true,
+    color: { argb: "FF555555" },
+  };
 
   if (recRow) {
-    ws.mergeCells("A41:H41");
-    ws.getCell("A41").value = `Pick: ${recRow.id} — Δ ${recRow.deltaUsd >= 0 ? "+" : "−"}$${Math.abs(recRow.deltaUsd).toLocaleString("en-US", { maximumFractionDigits: 0 })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${recRow.annualizedUsd >= 0 ? "+" : "−"}$${Math.abs(recRow.annualizedUsd).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-    ws.getCell("A41").font = { bold: true };
+    ws.mergeCells(`A${recTitleRow + 2}:H${recTitleRow + 2}`);
+    ws.getCell(`A${recTitleRow + 2}`).value = `Pick: ${recRow.id} — Δ ${recRow.deltaUsd >= 0 ? "+" : "−"}$${Math.abs(recRow.deltaUsd).toLocaleString("en-US", { maximumFractionDigits: 0 })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${recRow.annualizedUsd >= 0 ? "+" : "−"}$${Math.abs(recRow.annualizedUsd).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    ws.getCell(`A${recTitleRow + 2}`).font = { bold: true };
   }
 
-  ws.mergeCells("A42:H44");
-  ws.getCell("A42").value = rec.reason;
-  ws.getCell("A42").alignment = { wrapText: true, vertical: "top" };
-  ws.getRow(42).height = 18;
-  ws.getRow(43).height = 18;
-  ws.getRow(44).height = 18;
+  ws.mergeCells(`A${recTitleRow + 3}:H${recTitleRow + 5}`);
+  ws.getCell(`A${recTitleRow + 3}`).value = rec.reason;
+  ws.getCell(`A${recTitleRow + 3}`).alignment = {
+    wrapText: true,
+    vertical: "top",
+  };
+  ws.getRow(recTitleRow + 3).height = 18;
+  ws.getRow(recTitleRow + 4).height = 18;
+  ws.getRow(recTitleRow + 5).height = 18;
 
   const buffer = await wb.xlsx.writeBuffer();
   return new Blob([buffer as ArrayBuffer], {

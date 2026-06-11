@@ -12,10 +12,10 @@ export interface BuildRepricedOpts {
    * PE3 list price. When false the new price floats free and delta vs list
    * can go positive. */
   applyCapRule?: boolean;
-  /** User-defined custom scenario (from the Custom scenario checkbox). When
-   * scenarioId matches its id, this definition is used instead of the
-   * built-in A–H table. */
-  customScenario?: ScenarioDef | null;
+  /** Extra scenario definitions beyond the built-in A–H table — the user's
+   * custom scenario and any saved scenarios. When scenarioId matches one of
+   * these, that definition is used. */
+  extraScenarios?: readonly ScenarioDef[];
 }
 
 const FMT_CURRENCY = '"$"#,##0.00;("$"#,##0.00);"-"';
@@ -62,7 +62,7 @@ const DIM_DISPLAY: Record<string, string> = {
 export async function buildRepricedXlsx(opts: BuildRepricedOpts): Promise<Blob> {
   const scenario: ScenarioDef | undefined = resolveScenario(
     opts.scenarioId,
-    opts.customScenario
+    opts.extraScenarios
   );
   if (!scenario) throw new Error(`Unknown scenario: ${opts.scenarioId}`);
 

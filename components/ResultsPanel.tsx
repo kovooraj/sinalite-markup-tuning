@@ -16,8 +16,9 @@ interface Props {
   recommendation: Recommendation;
   sanity: string[];
   generating: boolean;
-  /** User-defined custom scenario active for this run, if any. */
-  customScenario?: ScenarioDef | null;
+  /** Extra scenarios active for this run beyond the built-in A–H — the
+   * user's custom scenario and any saved scenarios. */
+  extraScenarios?: readonly ScenarioDef[];
   onDownloadOnePager: () => void;
   onDownloadScenarios: () => void;
   onDownloadRepriced: (scenarioId: string) => void;
@@ -120,8 +121,10 @@ export function ResultsPanel(props: Props) {
             {scenarios.scenarios.map((s) => {
               const inBand = recommendation.inBand.some((x) => x.id === s.id);
               const isRecommended = recommendation.recommended?.id === s.id;
-              const def = resolveScenario(s.id, props.customScenario);
-              const isCustom = props.customScenario?.id === s.id;
+              const def = resolveScenario(s.id, props.extraScenarios);
+              const isCustom = !!props.extraScenarios?.some(
+                (x) => x.id === s.id
+              );
               return (
                 <tr
                   key={s.id}
