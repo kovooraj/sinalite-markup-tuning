@@ -3,7 +3,7 @@ import autoTable from "jspdf-autotable";
 import { saveAs } from "file-saver";
 import { BaseCatalogImpact, FinishingCatalogImpact, NbdLift } from "./catalogImpact";
 import { LossLeadersOutput } from "./lossLeaders";
-import { SCENARIO_BY_ID } from "./markupEngine";
+import { CUSTOM_SCENARIO_ID, SCENARIO_BY_ID, ScenarioDef } from "./markupEngine";
 import { Recommendation } from "./recommend";
 
 export interface OnePagerPdfOpts {
@@ -26,6 +26,10 @@ export interface OnePagerPdfOpts {
    * capped form. When false, the cap clause is dropped from every formula
    * and the subtitle reflects "Cap rule: DISABLED". */
   applyCapRule?: boolean;
+  /** Scenario whose gradients drive the three markup tables (sections 1–3).
+   * Defaults to A_Current_Locked. Pass the user's custom scenario to base
+   * the whole 1-pager on it. */
+  scenario?: ScenarioDef;
 }
 
 // --- formatters ---------------------------------------------------------
@@ -171,7 +175,8 @@ function markupTable(
 export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const c: Cursor = { y: MARGIN };
-  const A = SCENARIO_BY_ID["A_Current_Locked"];
+  const A = opts.scenario ?? SCENARIO_BY_ID["A_Current_Locked"];
+  const isCustom = A.id === CUSTOM_SCENARIO_ID;
   const applyCapRule = opts.applyCapRule ?? true;
 
   // Title
@@ -197,6 +202,14 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
     `Decisions locked ${opts.lockedDate}  |  ${subtitleCapLine}`,
     { italic: true, size: 8.5 }
   );
+  if (isCustom) {
+    para(
+      doc,
+      c,
+      `CUSTOM SCENARIO: markup tables below use your custom gradients — base ${A.baseFormatted}, finishing ${A.finFormatted}, NBD ${A.nbdFormatted} (not the locked A defaults).`,
+      { bold: true, size: 8.5, color: [153, 76, 0] }
+    );
+  }
 
   // Cost Center Classification — surfaces which PE3 production stages this
   // tool bucketed into Base vs Finishing for this specific product
@@ -347,7 +360,8 @@ export function buildOnePagerPdf(opts: OnePagerPdfOpts): Blob {
   const rec = opts.recommendation;
   const recRow = rec.recommended;
   const targetBandStr = `[${(opts.targetMinPct * 100).toFixed(1)}%, ${(opts.targetMaxPct * 100).toFixed(1)}%]`;
-  para(doc, c, `Target band: ${targetBandStr}. ${rec.inBand.length} of 8 scenarios fall inside this band. Δ = New Price (capped) − PE3 List Price.`);
+  const scenarioCount = rec.inBand.length + rec.outOfBand.length;
+  para(doc, c, `Target band: ${targetBandStr}. ${rec.inBand.length} of ${scenarioCount} scenarios fall inside this band. Δ = New Price (capped) − PE3 List Price.`);
   if (recRow) {
     para(doc, c,
       `Recommended: ${recRow.id} — Δ vs PE3 List ${fmtUsd(recRow.deltaUsd, { signed: true })} (${(recRow.pctDelta * 100).toFixed(2)}%) over 3 months, annualized ${fmtUsd(recRow.annualizedUsd, { signed: true })}.`,

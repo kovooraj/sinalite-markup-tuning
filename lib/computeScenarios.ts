@@ -296,13 +296,13 @@ function progressivelyMatch(
 export function computeAllScenarios(
   order: OrderReplayData,
   pe: PriceEngineData,
-  opts: { applyCapRule?: boolean } = {}
+  opts: { applyCapRule?: boolean; extraScenarios?: ScenarioDef[] } = {}
 ): ScenariosOutput {
   const applyCapRule = opts.applyCapRule ?? true;
   const result = progressivelyMatch(order, pe);
 
   const results: ScenarioResult[] = [];
-  for (const s of SCENARIOS) {
+  for (const s of [...SCENARIOS, ...(opts.extraScenarios ?? [])]) {
     results.push(runScenario(s, result.resolved, applyCapRule));
   }
 

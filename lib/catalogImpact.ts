@@ -1,4 +1,4 @@
-import { computeNewPrice, SCENARIO_BY_ID } from "./markupEngine";
+import { computeNewPrice, SCENARIO_BY_ID, ScenarioDef } from "./markupEngine";
 import { PriceEngineData, indexPriceEngine, isBaseRow } from "./parsePriceEngine";
 import { ScenarioResult } from "./computeScenarios";
 import { bandOf, BASE_BAND_LABELS } from "./qtyBands";
@@ -29,8 +29,11 @@ export interface NbdLift {
   baseRevenue3mo: number;
 }
 
-export function computeBaseCatalogImpact(pe: PriceEngineData): BaseCatalogImpact {
-  const A = SCENARIO_BY_ID["A_Current_Locked"];
+export function computeBaseCatalogImpact(
+  pe: PriceEngineData,
+  scenario?: ScenarioDef
+): BaseCatalogImpact {
+  const A = scenario ?? SCENARIO_BY_ID["A_Current_Locked"];
   const baseRows = pe.rows.filter(
     (r) => r.turnaround === "Standard" && isBaseRow(r, pe.dimensions)
   );
@@ -82,9 +85,10 @@ export function computeBaseCatalogImpact(pe: PriceEngineData): BaseCatalogImpact
 }
 
 export function computeFinishingCatalogImpact(
-  pe: PriceEngineData
+  pe: PriceEngineData,
+  scenario?: ScenarioDef
 ): FinishingCatalogImpact {
-  const A = SCENARIO_BY_ID["A_Current_Locked"];
+  const A = scenario ?? SCENARIO_BY_ID["A_Current_Locked"];
   // Need to look up the base counterpart of each variant row. Build an index
   // of base rows keyed on (stock, size, qty, turnaround). Use ALL of the price
   // engine's dimensions for the variant key (since both sides are PE rows),

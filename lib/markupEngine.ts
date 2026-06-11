@@ -112,6 +112,36 @@ export const SCENARIO_BY_ID: Record<string, ScenarioDef> = Object.fromEntries(
   SCENARIOS.map((s) => [s.id, s])
 );
 
+export const CUSTOM_SCENARIO_ID = "X_Custom";
+
+/** Build a user-defined scenario from raw gradient fractions (e.g. 0.35 = 35%).
+ * Used by the "Custom scenario" checkbox in the UI — the resulting ScenarioDef
+ * flows through the same compute / report / download pipeline as A–H. */
+export function makeCustomScenario(
+  base: Gradient["base"],
+  fin: Gradient["fin"],
+  nbd: Gradient["nbd"]
+): ScenarioDef {
+  return makeScenario(
+    CUSTOM_SCENARIO_ID,
+    `Custom (${fmt4(base)} base, ${fmt4(fin)} fin, ${fmt3(nbd)} NBD)`,
+    base,
+    fin,
+    nbd,
+    "User-defined custom scenario entered via the Custom scenario checkbox. Base, finishing, and turnaround (NBD) markups are exactly the percentages you typed — the report, 1-pager, and 3-month tuning all use these values when this scenario is selected."
+  );
+}
+
+/** Resolve a scenario id against the built-in table, falling back to a
+ * caller-supplied custom scenario when the id matches it. */
+export function resolveScenario(
+  id: string,
+  custom?: ScenarioDef | null
+): ScenarioDef | undefined {
+  if (custom && custom.id === id) return custom;
+  return SCENARIO_BY_ID[id];
+}
+
 export interface PriceComputeInput {
   qty: number;
   baseCost: number;

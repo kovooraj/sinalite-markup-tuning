@@ -158,7 +158,7 @@ export async function buildScenariosXlsx(opts: BuildScenariosOpts): Promise<Blob
   ws.getCell("A39").font = { bold: true, size: 12 };
 
   ws.mergeCells("A40:H40");
-  ws.getCell("A40").value = `Target band: ${targetBandStr} · ${rec.inBand.length} of 8 scenarios in band`;
+  ws.getCell("A40").value = `Target band: ${targetBandStr} · ${rec.inBand.length} of ${rec.inBand.length + rec.outOfBand.length} scenarios in band`;
   ws.getCell("A40").font = { italic: true, color: { argb: "FF555555" } };
 
   if (recRow) {

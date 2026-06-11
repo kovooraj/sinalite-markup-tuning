@@ -4,6 +4,13 @@ import { useMemo, useState } from "react";
 import { FileDrop } from "@/components/FileDrop";
 import { MetaForm, MetaFormValues } from "@/components/MetaForm";
 import { ResultsPanel } from "@/components/ResultsPanel";
+import {
+  CustomScenarioModal,
+  CustomGradientValues,
+  defaultCustomGradient,
+} from "@/components/CustomScenarioModal";
+import { makeCustomScenario, ScenarioDef } from "@/lib/markupEngine";
+import { InfoIcon } from "@/components/InfoIcon";
 import { parsePriceEngine, PriceEngineData } from "@/lib/parsePriceEngine";
 import { parseOrderReplay, OrderReplayData } from "@/lib/parseOrderReplay";
 import { computeAllScenarios, ScenariosOutput } from "@/lib/computeScenarios";
@@ -31,6 +38,9 @@ interface ComputedState {
   baseImpact: ReturnType<typeof computeBaseCatalogImpact>;
   finImpact: ReturnType<typeof computeFinishingCatalogImpact>;
   nbdLift: ReturnType<typeof computeNbdLift>;
+  /** Custom scenario active when this run was generated (null = none). The
+   * downloads use this snapshot so they always match the on-screen table. */
+  customScenario: ScenarioDef | null;
 }
 
 function todayIsoDate(): string {
@@ -162,11 +172,65 @@ export default function Home() {
     usdRate: 0.7,
     applyCapRule: true,
   });
+  const [customEnabled, setCustomEnabled] = useState(false);
+  const [customGrad, setCustomGrad] = useState<CustomGradientValues>(() =>
+    defaultCustomGradient()
+  );
+  const [customModalOpen, setCustomModalOpen] = useState(false);
+  // True only while the modal is open because the checkbox was just ticked —
+  // Cancel then unticks it again.
+  const [customPendingEnable, setCustomPendingEnable] = useState(false);
+
+  const customScenario = useMemo<ScenarioDef | null>(
+    () =>
+      customEnabled
+        ? makeCustomScenario(customGrad.base, customGrad.fin, customGrad.nbd)
+        : null,
+    [customEnabled, customGrad]
+  );
 
   const canGenerate = !!priceFile && !!orderFile && !generating;
 
-  async function handleGenerate() {
+  function handleCustomToggle(checked: boolean) {
+    if (checked) {
+      setCustomEnabled(true);
+      setCustomPendingEnable(true);
+      setCustomModalOpen(true);
+    } else {
+      setCustomEnabled(false);
+      runGenerate(null);
+    }
+  }
+
+  function handleCustomApply(next: CustomGradientValues) {
+    setCustomGrad(next);
+    setCustomModalOpen(false);
+    setCustomPendingEnable(false);
+    // Refresh the on-screen report with the new gradients if one was
+    // already generated.
+    runGenerate(makeCustomScenario(next.base, next.fin, next.nbd));
+  }
+
+  function handleCustomCancel() {
+    setCustomModalOpen(false);
+    if (customPendingEnable) {
+      // The checkbox was just ticked and the user backed out — untick it.
+      setCustomEnabled(false);
+      setCustomPendingEnable(false);
+    }
+  }
+
+  /** Re-run the report (if one is on screen) with the given custom scenario. */
+  function runGenerate(scenario: ScenarioDef | null) {
+    if (computed) void handleGenerate(scenario);
+  }
+
+  async function handleGenerate(
+    customOverride?: ScenarioDef | null
+  ) {
     if (!priceFile || !orderFile) return;
+    const activeCustom =
+      customOverride !== undefined ? customOverride : customScenario;
     setGenerating(true);
     setPriceErr("");
     setOrderErr("");
@@ -188,6 +252,7 @@ export default function Home() {
       }
       const scenarios = computeAllScenarios(order, pe, {
         applyCapRule: meta.applyCapRule,
+        extraScenarios: activeCustom ? [activeCustom] : [],
       });
       // Don't hard-block on zero matches — instead surface a strong warning
       // alongside the (empty) results so the user can still see what was
@@ -208,10 +273,17 @@ export default function Home() {
       // Prepend any parser warnings (USD conversion, format detection) to the
       // sanity list so the user sees them surfaced together.
       const allWarnings = [...order.warnings, ...sanity];
-      const baseImpact = computeBaseCatalogImpact(pe);
-      const finImpact = computeFinishingCatalogImpact(pe);
-      const a = scenarios.scenarios.find((s) => s.id === "A_Current_Locked")!;
-      const nbdLift = computeNbdLift(a);
+      // When a custom scenario is active, the 1-pager's catalog-impact and
+      // NBD-lift stats are based on it instead of the locked Scenario A.
+      const baseImpact = computeBaseCatalogImpact(pe, activeCustom ?? undefined);
+      const finImpact = computeFinishingCatalogImpact(
+        pe,
+        activeCustom ?? undefined
+      );
+      const liftSource = activeCustom
+        ? scenarios.scenarios.find((s) => s.id === activeCustom.id)!
+        : scenarios.scenarios.find((s) => s.id === "A_Current_Locked")!;
+      const nbdLift = computeNbdLift(liftSource);
       const lossLeaders = computeLossLeaders(order, pe);
 
       setComputed({
@@ -225,6 +297,7 @@ export default function Home() {
         finImpact,
         nbdLift,
         lossLeaders,
+        customScenario: activeCustom ?? null,
       });
     } catch {
       // errors surfaced inline above
@@ -260,6 +333,7 @@ export default function Home() {
         scenarioId,
         usdRate: meta.usdRate || 0.7,
         applyCapRule: meta.applyCapRule,
+        customScenario: computed.customScenario,
       });
     } finally {
       setGenerating(false);
@@ -277,6 +351,7 @@ export default function Home() {
         usdRate: meta.usdRate || 0.7,
         productSlug: computed.pe.productSlug,
         applyCapRule: meta.applyCapRule,
+        customScenario: computed.customScenario,
       });
     } finally {
       setGenerating(false);
@@ -301,6 +376,7 @@ export default function Home() {
         targetMaxPct: meta.targetMaxPct,
         costCenters: computed.pe.costCenters,
         applyCapRule: meta.applyCapRule,
+        scenario: computed.customScenario ?? undefined,
       });
     } finally {
       setGenerating(false);
@@ -360,12 +436,42 @@ export default function Home() {
 
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
           <MetaForm values={meta} onChange={setMeta} />
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-zinc-100 pt-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={customEnabled}
+                onChange={(e) => handleCustomToggle(e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-400 accent-blue-600"
+              />
+              <span className="flex items-center text-xs font-semibold text-zinc-700">
+                <span>Custom scenario</span>
+                <InfoIcon text="Opens a popup showing the markup breakdown for BASE, Finishing, and Turnaround (NBD) per qty band, prefilled from the locked Scenario A. Edit the percentages and apply — the custom scenario is added to the 3-month tuning table and the 1-pager, scenarios xlsx, and per-scenario downloads are based on it." />
+              </span>
+            </label>
+            {customEnabled && customScenario && (
+              <>
+                <span className="rounded bg-blue-50 px-2 py-1 font-mono text-[11px] text-blue-800">
+                  Base {customScenario.baseFormatted} · Fin{" "}
+                  {customScenario.finFormatted} · NBD{" "}
+                  {customScenario.nbdFormatted}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCustomModalOpen(true)}
+                  className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  Edit %
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             disabled={!canGenerate}
             className="rounded bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
@@ -389,6 +495,7 @@ export default function Home() {
             recommendation={computed.recommendation}
             sanity={computed.sanity}
             generating={generating}
+            customScenario={computed.customScenario}
             onDownloadOnePager={handleDownloadOnePager}
             onDownloadScenarios={handleDownloadScenarios}
             onDownloadRepriced={handleDownloadRepriced}
@@ -396,6 +503,13 @@ export default function Home() {
           />
         )}
       </section>
+
+      <CustomScenarioModal
+        open={customModalOpen}
+        values={customGrad}
+        onApply={handleCustomApply}
+        onCancel={handleCustomCancel}
+      />
 
       <footer className="mt-12 border-t border-zinc-200 pt-4 text-xs text-zinc-500">
         Locked methodology: Base + Add-On pricing, validated May 2026. Cap rule is

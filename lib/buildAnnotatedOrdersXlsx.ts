@@ -3,7 +3,7 @@ import { saveAs } from "file-saver";
 import { OrderReplayData } from "./parseOrderReplay";
 import { PriceEngineData } from "./parsePriceEngine";
 import { computeAllScenarios } from "./computeScenarios";
-import { computeNewPrice, SCENARIO_BY_ID, ScenarioDef } from "./markupEngine";
+import { computeNewPrice, resolveScenario, ScenarioDef } from "./markupEngine";
 import { bandOf, nbdBandOf } from "./qtyBands";
 
 export interface BuildAnnotatedOrdersOpts {
@@ -15,6 +15,10 @@ export interface BuildAnnotatedOrdersOpts {
   /** When false the cap rule is NOT applied — final price floats free of
    * the PE3 list price and delta vs list can go positive. Defaults to true. */
   applyCapRule?: boolean;
+  /** User-defined custom scenario (from the Custom scenario checkbox). When
+   * scenarioId matches its id, this definition is used instead of the
+   * built-in A–H table. */
+  customScenario?: ScenarioDef | null;
 }
 
 const FMT_CURRENCY = '"$"#,##0.00;("$"#,##0.00);"-"';
@@ -70,7 +74,10 @@ function round(n: number, digits: number): number {
 export async function buildAnnotatedOrdersXlsx(
   opts: BuildAnnotatedOrdersOpts
 ): Promise<Blob> {
-  const scenario: ScenarioDef | undefined = SCENARIO_BY_ID[opts.scenarioId];
+  const scenario: ScenarioDef | undefined = resolveScenario(
+    opts.scenarioId,
+    opts.customScenario
+  );
   if (!scenario) throw new Error(`Unknown scenario: ${opts.scenarioId}`);
 
   const applyCapRule = opts.applyCapRule ?? true;

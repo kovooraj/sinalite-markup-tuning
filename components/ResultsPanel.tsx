@@ -3,7 +3,7 @@
 import { ScenariosOutput } from "@/lib/computeScenarios";
 import { SelfCheckResult } from "@/lib/selfCheck";
 import { Recommendation } from "@/lib/recommend";
-import { SCENARIO_BY_ID } from "@/lib/markupEngine";
+import { resolveScenario, ScenarioDef } from "@/lib/markupEngine";
 import { InfoIcon } from "./InfoIcon";
 
 interface Props {
@@ -16,6 +16,8 @@ interface Props {
   recommendation: Recommendation;
   sanity: string[];
   generating: boolean;
+  /** User-defined custom scenario active for this run, if any. */
+  customScenario?: ScenarioDef | null;
   onDownloadOnePager: () => void;
   onDownloadScenarios: () => void;
   onDownloadRepriced: (scenarioId: string) => void;
@@ -81,7 +83,8 @@ export function ResultsPanel(props: Props) {
           </p>
           <p className="mt-1 text-[11px] text-green-800/70 italic">
             Source: sinalite-pricing-model SOP · Recommendation Heuristic ·{" "}
-            {recommendation.inBand.length} of 8 scenarios in your target band.
+            {recommendation.inBand.length} of {scenarios.scenarios.length}{" "}
+            scenarios in your target band.
           </p>
         </div>
       )}
@@ -117,17 +120,25 @@ export function ResultsPanel(props: Props) {
             {scenarios.scenarios.map((s) => {
               const inBand = recommendation.inBand.some((x) => x.id === s.id);
               const isRecommended = recommendation.recommended?.id === s.id;
+              const def = resolveScenario(s.id, props.customScenario);
+              const isCustom = props.customScenario?.id === s.id;
               return (
                 <tr
                   key={s.id}
-                  className={isRecommended ? "bg-green-50" : inBand ? "bg-zinc-50" : ""}
+                  className={
+                    isRecommended
+                      ? "bg-green-50"
+                      : isCustom
+                        ? "bg-blue-50"
+                        : inBand
+                          ? "bg-zinc-50"
+                          : ""
+                  }
                 >
                   <td className="border border-zinc-200 px-2 py-1 font-mono">
                     <span className="inline-flex items-center">
                       <span>{s.id}</span>
-                      {SCENARIO_BY_ID[s.id]?.description && (
-                        <InfoIcon text={SCENARIO_BY_ID[s.id].description} />
-                      )}
+                      {def?.description && <InfoIcon text={def.description} />}
                     </span>
                   </td>
                   <td className="border border-zinc-200 px-2 py-1">{s.baseFormatted}</td>
