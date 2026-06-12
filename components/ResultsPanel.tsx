@@ -3,7 +3,7 @@
 import { ScenariosOutput } from "@/lib/computeScenarios";
 import { SelfCheckResult } from "@/lib/selfCheck";
 import { Recommendation } from "@/lib/recommend";
-import { resolveScenario, ScenarioDef } from "@/lib/markupEngine";
+import { resolveScenario, SAVED_SCENARIO_PREFIX, ScenarioDef } from "@/lib/markupEngine";
 import { InfoIcon } from "./InfoIcon";
 
 interface Props {
@@ -19,7 +19,7 @@ interface Props {
   /** Extra scenarios active for this run beyond the built-in A–H — the
    * user's custom scenario and any saved scenarios. */
   extraScenarios?: readonly ScenarioDef[];
-  onDownloadOnePager: () => void;
+  onDownloadOnePager: (scenarioId: string) => void;
   onDownloadScenarios: () => void;
   onDownloadRepriced: (scenarioId: string) => void;
   onDownloadAnnotatedOrders: (scenarioId: string) => void;
@@ -36,8 +36,24 @@ function fmtPct(v: number): string {
   return `${sign}${Math.abs(v * 100).toFixed(1)}%`;
 }
 
+// Assign letters I, J, K… to saved scenarios in order of appearance.
+// Built-in A–H occupy the first 8 letters; saved scenarios start at I (char code 73).
+function buildSavedLetterMap(extraScenarios?: readonly ScenarioDef[]): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!extraScenarios) return map;
+  let idx = 0;
+  for (const s of extraScenarios) {
+    if (s.id.startsWith(SAVED_SCENARIO_PREFIX)) {
+      map.set(s.id, String.fromCharCode(73 + idx));
+      idx++;
+    }
+  }
+  return map;
+}
+
 export function ResultsPanel(props: Props) {
   const { recommendation, scenarios, selfCheck } = props;
+  const savedLetterMap = buildSavedLetterMap(props.extraScenarios);
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
       <h2 className="mb-3 text-lg font-semibold">Results — {props.productName}</h2>
@@ -115,6 +131,7 @@ export function ResultsPanel(props: Props) {
               <th className="border border-zinc-200 px-2 py-1">Status</th>
               <th className="border border-zinc-200 px-2 py-1">Repriced Catalog</th>
               <th className="border border-zinc-200 px-2 py-1">Annotated Orders</th>
+              <th className="border border-zinc-200 px-2 py-1">1-Pager</th>
             </tr>
           </thead>
           <tbody>
@@ -139,8 +156,13 @@ export function ResultsPanel(props: Props) {
                   }
                 >
                   <td className="border border-zinc-200 px-2 py-1 font-mono">
-                    <span className="inline-flex items-center">
-                      <span>{s.id}</span>
+                    <span className="inline-flex items-center gap-1">
+                      <span>{savedLetterMap.get(s.id) ?? s.id}</span>
+                      {savedLetterMap.has(s.id) && def && (
+                        <span className="font-sans text-[10px] font-normal text-zinc-500 max-w-[120px] truncate" title={def.label}>
+                          {def.label.split(" — saved")[0]}
+                        </span>
+                      )}
                       {def?.description && <InfoIcon text={def.description} />}
                     </span>
                   </td>
@@ -191,6 +213,22 @@ export function ResultsPanel(props: Props) {
                       {isRecommended ? "⬇ ★ Download" : "⬇ Download"}
                     </button>
                   </td>
+                  <td className="border border-zinc-200 px-2 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => props.onDownloadOnePager(s.id)}
+                      disabled={props.generating}
+                      className={[
+                        "rounded px-2 py-1 text-xs font-medium text-white disabled:opacity-50",
+                        isRecommended
+                          ? "bg-green-600 hover:bg-green-700"
+                          : "bg-zinc-700 hover:bg-zinc-800",
+                      ].join(" ")}
+                      title={`Download 1-pager PDF for scenario ${savedLetterMap.get(s.id) ?? s.id}`}
+                    >
+                      {isRecommended ? "⬇ ★ PDF" : "⬇ PDF"}
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -199,14 +237,6 @@ export function ResultsPanel(props: Props) {
       </div>
 
       <div className="mt-5 flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={props.onDownloadOnePager}
-          disabled={props.generating}
-          className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
-        >
-          ⬇ Download 1-Pager (.pdf)
-        </button>
         <button
           type="button"
           onClick={props.onDownloadScenarios}
@@ -222,8 +252,9 @@ export function ResultsPanel(props: Props) {
         catalog with new prices applied;{" "}
         <span className="font-medium">Annotated Orders</span> — your 3-month
         order data with each order&apos;s base + finishing + NBD markup chain
-        shown end-to-end, totals + annualized delta at the bottom. The ★ green
-        row is the system&apos;s pick.
+        shown end-to-end, totals + annualized delta at the bottom;{" "}
+        <span className="font-medium">1-Pager</span> — the locked markup
+        reference PDF for that scenario. The ★ green row is the system&apos;s pick.
       </p>
     </div>
   );

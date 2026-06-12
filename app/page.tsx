@@ -9,7 +9,7 @@ import {
   CustomGradientValues,
   defaultCustomGradient,
 } from "@/components/CustomScenarioModal";
-import { makeCustomScenario, ScenarioDef } from "@/lib/markupEngine";
+import { makeCustomScenario, resolveScenario, ScenarioDef } from "@/lib/markupEngine";
 import {
   getSavedScenariosServerSnapshot,
   getSavedScenariosSnapshot,
@@ -431,25 +431,40 @@ export default function Home() {
     }
   }
 
-  async function handleDownloadOnePager() {
+  async function handleDownloadOnePager(scenarioId: string) {
     if (!computed) return;
     setGenerating(true);
     try {
+      // Resolve the ScenarioDef — could be a built-in, saved, or custom.
+      const scenarioDef = resolveScenario(scenarioId, computed.extraScenarios);
+      if (!scenarioDef) return;
+      // For scenario A (the locked baseline) pass undefined so the 1-pager
+      // uses its hardcoded defaults. For everything else pass the def so the
+      // markup tables and impact stats reflect that scenario's gradients.
+      const scenarioArg =
+        scenarioDef.id === "A_Current_Locked" ? undefined : scenarioDef;
+      const scenarioResult = computed.scenarios.scenarios.find(
+        (s) => s.id === scenarioId
+      );
+      if (!scenarioResult) return;
+      const baseImpact = computeBaseCatalogImpact(computed.pe, scenarioArg);
+      const finImpact = computeFinishingCatalogImpact(computed.pe, scenarioArg);
+      const nbdLift = computeNbdLift(scenarioResult);
       downloadOnePagerPdf({
         productName: computed.pe.productName,
         productSlug: computed.pe.productSlug,
         lockedDate: meta.lockedDate || todayIsoDate(),
         owner: meta.owner,
-        baseImpact: computed.baseImpact,
-        finImpact: computed.finImpact,
-        nbdLift: computed.nbdLift,
+        baseImpact,
+        finImpact,
+        nbdLift,
         lossLeaders: computed.lossLeaders,
         recommendation: computed.recommendation,
         targetMinPct: meta.targetMinPct,
         targetMaxPct: meta.targetMaxPct,
         costCenters: computed.pe.costCenters,
         applyCapRule: meta.applyCapRule,
-        scenario: computed.customScenario ?? undefined,
+        scenario: scenarioArg,
       });
     } finally {
       setGenerating(false);
