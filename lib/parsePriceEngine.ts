@@ -62,6 +62,12 @@ const BASE_MACHINE_OVERRIDES: { product: RegExp; machine: RegExp }[] = [
   // brochure — its cost belongs in base, not finishing. (Tolerates the
   // common "Stahifold" misspelling and optional "#".)
   { product: /brochure/i, machine: /stah[li]fold\s*b30\s*#?\s*1\b/i },
+  // Booklets: the saddle-stitcher, booklet-maker, and fold are all
+  // integral to producing the booklet itself — not optional finishing
+  // add-ons — so their costs belong in base.
+  { product: /booklet/i, machine: /heidelberg\s+stitchmaster\s+st\s*100\b/i },
+  { product: /booklet/i, machine: /horizon\s+bookmaker\s+spf[-\s]?200\b/i },
+  { product: /booklet/i, machine: /stah[li]fold\s*b30\s*#?\s*1\b/i },
 ];
 
 function isFinishingMachine(name: string, productName: string): boolean {
