@@ -531,6 +531,16 @@ export async function parseOrderReplay(
   }
   const m = buildColMap(aoa[0]);
   const dimIdx = detectDimensions(aoa[0]);
+  // Booklet-style CSVs have both a "Dimensions" column (physical size, e.g.
+  // "8.5 x 5.5") and a "size" column (page count, e.g. "48pg"). Apply the
+  // same dual-column logic as parsePriceEngine: use Dimensions as the lookup
+  // size and inject the page count as a "pages" dimension so matching keys
+  // align with the PE.
+  const idxDimensionsOverride = findColIndex(aoa[0], ["Dimensions", "PE3 Dimensions"]);
+  if (idxDimensionsOverride >= 0 && m.size >= 0 && idxDimensionsOverride !== m.size) {
+    if (!("pages" in dimIdx)) dimIdx["pages"] = m.size;
+    m.size = idxDimensionsOverride;
+  }
   const dimensions = Object.keys(dimIdx).sort();
   const idCols = detectIdentifierCols(aoa[0]);
 
