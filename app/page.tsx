@@ -167,6 +167,14 @@ function computeSanity(
       `Customer "no change" share: ${(a.dist.noChange * 100).toFixed(1)}% — cap rule may not be applying correctly.`
     );
   }
+  const allScenariosZero =
+    scenarios.scenarios.length > 0 &&
+    scenarios.scenarios.every((s) => Math.abs(s.deltaUsd) < 0.01);
+  if (scenarios.matchedOrderRows > 0 && allScenariosZero) {
+    warnings.push(
+      `All scenario deltas are $0. Every markup scenario produces a model price above the current catalog prices, so the cap rule holds prices at their current list price with no revenue change. This typically means the product is priced below the markup model targets. Uncheck "Apply cap rule" in the form above to see what these markup scenarios would yield uncapped.`
+    );
+  }
   return warnings;
 }
 

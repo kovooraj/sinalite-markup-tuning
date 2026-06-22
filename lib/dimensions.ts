@@ -38,7 +38,7 @@ export const DIMENSIONS: readonly DimensionDef[] = [
   { key: "foil", aliases: ["Foil", "PE3 Foil"] },
   { key: "embossing", aliases: ["Embossing", "PE3 Embossing"] },
   { key: "diecutting", aliases: ["Die Cutting", "Diecutting", "PE3 Die Cutting"] },
-  { key: "corner", aliases: ["Corner", "Rounded Corner", "PE3 Corner"] },
+  { key: "corner", aliases: ["Corner", "Rounded Corner", "Round Corner", "Round Corners", "Rounded Corners", "PE3 Corner"] },
   { key: "perforation", aliases: ["Perforation", "PE3 Perforation"] },
   { key: "drilling", aliases: ["Drilling", "PE3 Drilling"] },
   { key: "foldType", aliases: ["Fold Type", "PE3 Fold Type", "Folding Type", "Fold"] },
